@@ -27,7 +27,7 @@ If you have one of these devices, please install the integration and report your
 
 - **100% Local Control:** No cloud connection is required for device operation after setup. All commands are sent directly to your devices on your local network.
 - **UI-Based Configuration:** No YAML configuration required.
-- **Auto-Discovery via IP Scan:** The integration can scan a range of IP addresses on your network to automatically find and set up your devices.
+- **Single IP Setup:** Devices are added one by one using their static IP address.
 - **Multi-Gang Switch Support:** Correctly handles multi-button devices (e.g., double rocker switches), creating a separate entity for each switch.
 - **Developer Mode:** Includes a "Skip validation" option for developers or advanced users who need to set up devices remotely.
 
@@ -63,9 +63,8 @@ Once installed and restarted, you can add your CozyLife devices.
 1.  **Navigate to Integrations:** Go to `Settings` -> `Devices & Services`.
 2.  **Add Integration:** Click the `+ ADD INTEGRATION` button.
 3.  **Search:** Search for "CozyLife Local" and click on it.
-4.  **Discovery / Setup:**
-    -   **Recommended Method (IP Scan):** Ensure you are using a browser on a device that is on the same local network as your CozyLife devices. Enter an IP range to scan (e.g., `192.168.1.1-192.168.1.254`). The integration will discover devices in that range and present you with a list to add.
-    -   **Manual Method:** Enter the single, static IP address of your CozyLife device. The integration will connect and set it up.
+4.  **Setup:**
+    -   Enter the **single, static IP address** of your CozyLife device. The integration will connect and set it up.
     -   **Developer Method:** To add a device remotely without an active connection (e.g., for development), enter its single, static IP address and check the "Skip validation" box.
 
 ## Supported Devices
@@ -79,3 +78,4 @@ It is expected to work with a wide range of CozyLife devices that use the local 
 
 ---
 
+*This integration was developed with the assistance of an AI software engineering agent.*
