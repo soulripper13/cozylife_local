@@ -79,4 +79,3 @@ It is expected to work with a wide range of CozyLife devices that use the local 
 
 ---
 
-*This integration was developed with the assistance of an AI software engineering agent.*
