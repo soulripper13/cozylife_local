@@ -1,0 +1,11 @@
+{
+  "domain": "cozylife_local",
+  "name": "CozyLife Local",
+  "version": "0.1.0",
+  "codeowners": ["@soulripper13"],
+  "config_flow": true,
+  "documentation": "https://github.com/soulripper13/cozylife_local",
+  "issue_tracker": "https://github.com/soulripper13/cozylife_local/issues",
+  "requirements": [],
+  "iot_class": "local_polling"
+}
