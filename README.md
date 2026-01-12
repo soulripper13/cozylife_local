@@ -1,6 +1,7 @@
 # Home Assistant CozyLife Local Integration
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/soulripper13/cozylife_local)
+[![Support Development](https://img.shields.io/badge/Support-Development-FFDD00?style=for-the-badge&logo=paypal&logoColor=black)](#support-the-project)
 
 This is a custom integration for Home Assistant to control CozyLife smart devices. It communicates with devices **100% locally**, removing any dependency on cloud services for operation.
 
@@ -218,6 +219,16 @@ If your device has DPIDs `5` (Hue) and `6` (Saturation), RGB color control shoul
 ```
 
 ---
+### Ways to Support
+
+* **PayPal**
+  [https://paypal.me/SKatoaroo](https://paypal.me/SKatoaroo)
+
+* **Bitcoin (BTC)**
+  `bc1qvu8a9gdy3dcxa94jge7d3rd7claapsydjsjxn0`
+
+* **Solana (SOL)**
+  `4jvCR2YFQLqguoyz9qAMPzVbaEcDsG5nzRHFG8SeaeBK`
 
 ## Contributing
 
