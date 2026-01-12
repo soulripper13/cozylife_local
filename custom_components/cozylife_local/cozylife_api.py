@@ -200,7 +200,7 @@ class CozyLifeDevice:
         self._dpid = [str(dpid) for dpid in query_msg['attr']]
 
         _LOGGER.info(
-            f"Successfully discovered device {self._ip_address} locally: "
+            f"Device query successful - {self._ip_address}: "
             f"DID={self.device_id}, PID={self.pid}, Type={self.device_type_code}, DPIDs={self.dpid}"
         )
         return True

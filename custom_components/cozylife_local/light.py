@@ -22,6 +22,7 @@ from .const import (
     DOMAIN,
     LIGHT_TYPE_CODE,
     BRIGHT,
+    BRIGHT_ALT,  # Alternative brightness DPID for some devices
     TEMP, # Corrected import
     HUE,
     SAT,
@@ -43,15 +44,16 @@ async def async_setup_entry(
 ):
     """Set up CozyLife light platform."""
     coordinator: CozyLifeCoordinator = hass.data[DOMAIN][config_entry.entry_id]
-    
+
     if coordinator.device.device_type_code != LIGHT_TYPE_CODE:
-        _LOGGER.debug(f"Device {coordinator.device.ip_address} is not a light, skipping light platform setup.")
+        _LOGGER.info(f"Device {coordinator.device.ip_address} (Type: {coordinator.device.device_type_code}) is not a light, skipping light platform setup.")
         return
 
     if coordinator.device.dpid is None or coordinator.device.device_model_name is None:
-        _LOGGER.error(f"Missing device DPID or model name for {coordinator.device.ip_address}. Cannot set up light.")
+        _LOGGER.error(f"❌ Missing device DPID or model name for {coordinator.device.ip_address}. Cannot set up light.")
         return
-    
+
+    _LOGGER.warning(f"💡 Setting up LIGHT entity for {coordinator.device.device_model_name}")
     async_add_entities([CozyLifeLight(coordinator)], True)
 
 class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
@@ -62,20 +64,44 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
         super().__init__(coordinator)
         self._attr_name = coordinator.device.device_model_name
         self._attr_unique_id = f"{coordinator.device.device_id}_light"
-        
+
+        _LOGGER.warning(f"   ├─ Analyzing light capabilities...")
+        _LOGGER.warning(f"   ├─ DPIDs: {coordinator.device.dpid}")
+
         self._supported_color_modes: set[ColorMode] = set()
         if not coordinator.device.dpid:
             self._supported_color_modes.add(ColorMode.ONOFF)
+            _LOGGER.warning(f"   └─ ⚠️  No DPIDs found - defaulting to ON/OFF only")
             return
 
+        # Determine which brightness DPID this device uses (if any)
+        # Some devices use DPID '4', others use DPID '3' for brightness
+        has_brightness = BRIGHT in coordinator.device.dpid or BRIGHT_ALT in coordinator.device.dpid
+        self._brightness_dpid = BRIGHT if BRIGHT in coordinator.device.dpid else (BRIGHT_ALT if BRIGHT_ALT in coordinator.device.dpid else None)
+
+        if self._brightness_dpid:
+            _LOGGER.warning(f"   ├─ ✓ Brightness: DPID {self._brightness_dpid}")
+
+        # Check for RGB color support (HS mode includes brightness)
         if HUE in coordinator.device.dpid and SAT in coordinator.device.dpid:
             self._supported_color_modes.add(ColorMode.HS)
-        if TEMP in coordinator.device.dpid:
+            _LOGGER.warning(f"   ├─ ✓ RGB Color: DPIDs {HUE} (Hue) + {SAT} (Saturation)")
+        # Check for color temperature support (also includes brightness)
+        # Only treat DPID '3' as TEMP if device doesn't use it for brightness
+        if TEMP in coordinator.device.dpid and self._brightness_dpid != BRIGHT_ALT:
             self._supported_color_modes.add(ColorMode.COLOR_TEMP)
-        if BRIGHT in coordinator.device.dpid and not self._supported_color_modes:
+            _LOGGER.warning(f"   ├─ ✓ Color Temperature: DPID {TEMP}")
+        # Check for brightness-only support (no color)
+        if has_brightness and not self._supported_color_modes:
             self._supported_color_modes.add(ColorMode.BRIGHTNESS)
+            _LOGGER.warning(f"   ├─ Brightness-only light (no color)")
+        # Fallback to on/off only
         if not self._supported_color_modes:
             self._supported_color_modes.add(ColorMode.ONOFF)
+            _LOGGER.warning(f"   └─ ⚠️  ON/OFF only - no dimming/color capabilities detected")
+        else:
+            modes_str = ", ".join([mode.value for mode in self._supported_color_modes])
+            _LOGGER.warning(f"   └─ Supported modes: {modes_str}")
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -95,10 +121,10 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
     @property
     def brightness(self) -> Optional[int]:
         """Return the brightness of this light between 0..255."""
-        if BRIGHT not in self.coordinator.data:
+        if not self._brightness_dpid or self._brightness_dpid not in self.coordinator.data:
             return None
         # Device returns 0-1000, HA uses 0-255
-        device_brightness = self.coordinator.data[BRIGHT]
+        device_brightness = self.coordinator.data[self._brightness_dpid]
         return int((device_brightness / 1000) * 255)
 
     @property
@@ -110,13 +136,13 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
              return ColorMode.HS
         if work_mode == 0 and ColorMode.COLOR_TEMP in self._supported_color_modes: # Assuming 0 is white mode
             return ColorMode.COLOR_TEMP
-        
+
         # Fallback if work_mode is not present
         if ColorMode.HS in self._supported_color_modes and HUE in self.coordinator.data:
             return ColorMode.HS
         if ColorMode.COLOR_TEMP in self._supported_color_modes and TEMP in self.coordinator.data:
             return ColorMode.COLOR_TEMP
-        if ColorMode.BRIGHTNESS in self._supported_color_modes and BRIGHT in self.coordinator.data:
+        if ColorMode.BRIGHTNESS in self._supported_color_modes and self._brightness_dpid and self._brightness_dpid in self.coordinator.data:
              return ColorMode.BRIGHTNESS
         return ColorMode.ONOFF
 
@@ -158,10 +184,10 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
         """Turn the light on."""
         payload: Dict[str, Any] = {SWITCH: 1}
 
-        if ATTR_BRIGHTNESS in kwargs and BRIGHT in self.coordinator.device.dpid:
+        if ATTR_BRIGHTNESS in kwargs and self._brightness_dpid and self._brightness_dpid in self.coordinator.device.dpid:
             ha_brightness = kwargs[ATTR_BRIGHTNESS]
             # Convert HA's 0-255 to device's 0-1000
-            payload[BRIGHT] = int((ha_brightness / 255) * 1000)
+            payload[self._brightness_dpid] = int((ha_brightness / 255) * 1000)
 
         if ATTR_HS_COLOR in kwargs and HUE in self.coordinator.device.dpid and SAT in self.coordinator.device.dpid:
             hs_color = kwargs[ATTR_HS_COLOR]
@@ -172,7 +198,7 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
             payload[HUE] = int(hs_color[0])
             payload[SAT] = int(hs_color[1] * 10)
 
-        if ATTR_COLOR_TEMP_KELVIN in kwargs and TEMP in self.coordinator.device.dpid:
+        if ATTR_COLOR_TEMP_KELVIN in kwargs and TEMP in self.coordinator.device.dpid and self._brightness_dpid != BRIGHT_ALT:
             ha_kelvin = kwargs[ATTR_COLOR_TEMP_KELVIN]
             # Set work mode to white (assuming 0)
             if WORK_MODE in self.coordinator.device.dpid:

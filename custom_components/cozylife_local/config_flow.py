@@ -54,10 +54,13 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Helper to create a config entry from a single IP address."""
         errors: Dict[str, str] = {}
         try:
+            _LOGGER.warning(f"🔍 Validating CozyLife device at {ip_address}...")
             device = CozyLifeDevice(ip_address)
             if not await device.async_update_device_info():
+                 _LOGGER.error(f"❌ Cannot connect to device at {ip_address}. Check IP address and network connectivity.")
                  errors["base"] = "cannot_connect"
             else:
+                _LOGGER.warning(f"✅ Device validated: {device.device_model_name or 'Unknown'} (DID: {device.device_id}, PID: {device.pid})")
                 await self.async_set_unique_id(device.device_id)
                 self._abort_if_unique_id_configured()
 
@@ -66,13 +69,15 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     data={"ip_address": ip_address, "device_id": device.device_id}
                 )
         except asyncio.TimeoutError:
+            _LOGGER.error(f"❌ Timeout connecting to {ip_address}. Device may be offline or unreachable.")
             errors["base"] = "timeout_connect"
         except ConnectionRefusedError:
+            _LOGGER.error(f"❌ Connection refused to {ip_address}. Check if device is powered on.")
             errors["base"] = "cannot_connect"
         except Exception as e:
-            _LOGGER.exception("Unexpected error during CozyLife device setup")
+            _LOGGER.exception(f"❌ Unexpected error during CozyLife device setup at {ip_address}")
             errors["base"] = "unknown"
-        
+
         return self.async_show_form(
             step_id="user", data_schema=DATA_SCHEMA, errors=errors # Re-show user form on error
         )
