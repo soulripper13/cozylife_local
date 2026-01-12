@@ -22,6 +22,7 @@ COLOR_MODE = '5'   # Some devices use DPID 5 for color/mode selection
 # Supported device types (derived from old integration, actual support depends on pid_list)
 SWITCH_TYPE_CODE = '00'
 LIGHT_TYPE_CODE = '01'
-SUPPORT_DEVICE_CATEGORY = [SWITCH_TYPE_CODE, LIGHT_TYPE_CODE]
+RGB_LIGHT_TYPE_CODE = '02'  # RGB lights (some devices use type 02 for RGB/color lights)
+SUPPORT_DEVICE_CATEGORY = [SWITCH_TYPE_CODE, LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]
 
 PLATFORMS = ["light", "switch"] # Supported Home Assistant platforms

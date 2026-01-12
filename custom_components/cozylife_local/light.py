@@ -21,6 +21,7 @@ from homeassistant.util.color import (
 from .const import (
     DOMAIN,
     LIGHT_TYPE_CODE,
+    RGB_LIGHT_TYPE_CODE,  # Type 02 for RGB lights
     BRIGHT,
     BRIGHT_ALT,  # Alternative brightness DPID for some devices
     TEMP, # Corrected import
@@ -45,7 +46,8 @@ async def async_setup_entry(
     """Set up CozyLife light platform."""
     coordinator: CozyLifeCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
-    if coordinator.device.device_type_code != LIGHT_TYPE_CODE:
+    # Accept both Type 01 (Light) and Type 02 (RGB Light)
+    if coordinator.device.device_type_code not in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]:
         _LOGGER.info(f"Device {coordinator.device.ip_address} (Type: {coordinator.device.device_type_code}) is not a light, skipping light platform setup.")
         return
 

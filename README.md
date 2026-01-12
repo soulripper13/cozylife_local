@@ -1,7 +1,6 @@
 # Home Assistant CozyLife Local Integration
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/soulripper13/cozylife_local)
-[![Support Development](https://img.shields.io/badge/Support-Development-FFDD00?style=for-the-badge&logo=paypal&logoColor=black)](#support-the-project)
 
 This is a custom integration for Home Assistant to control CozyLife smart devices. It communicates with devices **100% locally**, removing any dependency on cloud services for operation.
 
@@ -144,6 +143,18 @@ DPIDs (Data Point IDs) are the functions your device supports. Common DPIDs incl
 
 **Important:** Some devices (especially LED strips with PID `d50v0i`) use DPID `3` for brightness instead of color temperature. The integration automatically detects this.
 
+### Understanding Device Type Codes
+
+Your device's Type Code determines how it's set up in Home Assistant:
+
+| Type Code | Category | Description |
+|-----------|----------|-------------|
+| `00` | Switch | Wall switches, smart plugs |
+| `01` | Light | Basic lights, tunable white lights |
+| `02` | RGB Light | RGB LED strips and color-changing lights |
+
+**Note:** Devices with Type Code `02` will be set up as lights with full RGB and brightness control, not as switches.
+
 ### Troubleshooting with Logs
 
 If your device isn't working as expected:
@@ -181,15 +192,21 @@ It is expected to work with a wide range of CozyLife devices that use the local 
 
 ### My LED strip only shows on/off, no brightness control
 
-**Solution:** This was a known issue with devices that use DPID `3` for brightness (like PID: `d50v0i`). Update to the latest version of the integration which includes automatic detection of alternative DPID mappings.
+**Solution:** This was a known issue with devices that use DPID `3` for brightness (like PID: `d50v0i`). Update to the latest version of the integration which includes:
+- Automatic detection of alternative DPID mappings
+- Support for Device Type Code `02` (RGB lights)
 
 Check your logs for:
 ```
-✓ Brightness: DPID 3
-Supported modes: brightness
+Device Type Code: 02
+Device Category: RGB Light
+✓ Brightness: DPID 3 (or DPID 4)
+Supported modes: brightness, hs
 ```
 
-If you still see `ON/OFF only`, please [open an issue](https://github.com/soulripper13/cozylife_local/issues) with your device's log output.
+If you still see your RGB light set up as a switch instead of a light, check the Device Type Code. If it's `02`, you need to update to the latest version of the integration.
+
+If you see `ON/OFF only`, please [open an issue](https://github.com/soulripper13/cozylife_local/issues) with your device's log output.
 
 ### How do I find my device's IP address?
 
@@ -219,16 +236,6 @@ If your device has DPIDs `5` (Hue) and `6` (Saturation), RGB color control shoul
 ```
 
 ---
-### Ways to Support
-
-* **PayPal**
-  [https://paypal.me/SKatoaroo](https://paypal.me/SKatoaroo)
-
-* **Bitcoin (BTC)**
-  `bc1qvu8a9gdy3dcxa94jge7d3rd7claapsydjsjxn0`
-
-* **Solana (SOL)**
-  `4jvCR2YFQLqguoyz9qAMPzVbaEcDsG5nzRHFG8SeaeBK`
 
 ## Contributing
 

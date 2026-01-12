@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, LIGHT_TYPE_CODE
+from .const import DOMAIN, LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE
 from .coordinator import CozyLifeCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,8 +30,8 @@ async def async_setup_entry(
         return
 
     # Do not create switches for devices that are explicitly lights.
-    if coordinator.device.device_type_code == LIGHT_TYPE_CODE:
-        _LOGGER.info(f"Device {coordinator.device.ip_address} is a light, skipping switch setup.")
+    if coordinator.device.device_type_code in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]:
+        _LOGGER.info(f"Device {coordinator.device.ip_address} (Type: {coordinator.device.device_type_code}) is a light, skipping switch setup.")
         return
 
     entities = []

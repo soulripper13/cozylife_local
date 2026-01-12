@@ -52,6 +52,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device_type_name = "Switch"
     elif device.device_type_code == "01":
         device_type_name = "Light"
+    elif device.device_type_code == "02":
+        device_type_name = "RGB Light"
     _LOGGER.warning(f"║ Device Category: {device_type_name}")
     _LOGGER.warning(f"║ ")
 
