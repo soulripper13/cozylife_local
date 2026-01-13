@@ -15,16 +15,17 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util.color import (
     color_temperature_kelvin_to_mired as kelvin_to_mired,
     color_temperature_mired_to_kelvin as mired_to_kelvin,
+    color_hs_to_RGB,
+    color_RGB_to_hs,
 )
 
 
 from .const import (
     DOMAIN,
     LIGHT_TYPE_CODE,
-    RGB_LIGHT_TYPE_CODE,  # Type 02 for RGB lights
+    RGB_LIGHT_TYPE_CODE,
     BRIGHT,
-    BRIGHT_ALT,  # Alternative brightness DPID for some devices
-    TEMP, # Corrected import
+    TEMP,
     HUE,
     SAT,
     SWITCH,
@@ -76,27 +77,26 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
             _LOGGER.warning(f"   └─ ⚠️  No DPIDs found - defaulting to ON/OFF only")
             return
 
-        # Determine which brightness DPID this device uses (if any)
-        # Some devices use DPID '4', others use DPID '3' for brightness
-        has_brightness = BRIGHT in coordinator.device.dpid or BRIGHT_ALT in coordinator.device.dpid
-        self._brightness_dpid = BRIGHT if BRIGHT in coordinator.device.dpid else (BRIGHT_ALT if BRIGHT_ALT in coordinator.device.dpid else None)
-
-        if self._brightness_dpid:
-            _LOGGER.warning(f"   ├─ ✓ Brightness: DPID {self._brightness_dpid}")
+        # Check for brightness support (DPID 4)
+        has_brightness = BRIGHT in coordinator.device.dpid
+        if has_brightness:
+            _LOGGER.warning(f"   ├─ ✓ Brightness: DPID {BRIGHT}")
 
         # Check for RGB color support (HS mode includes brightness)
         if HUE in coordinator.device.dpid and SAT in coordinator.device.dpid:
             self._supported_color_modes.add(ColorMode.HS)
             _LOGGER.warning(f"   ├─ ✓ RGB Color: DPIDs {HUE} (Hue) + {SAT} (Saturation)")
-        # Check for color temperature support (also includes brightness)
-        # Only treat DPID '3' as TEMP if device doesn't use it for brightness
-        if TEMP in coordinator.device.dpid and self._brightness_dpid != BRIGHT_ALT:
+
+        # Check for color temperature support (DPID 3)
+        if TEMP in coordinator.device.dpid:
             self._supported_color_modes.add(ColorMode.COLOR_TEMP)
             _LOGGER.warning(f"   ├─ ✓ Color Temperature: DPID {TEMP}")
+
         # Check for brightness-only support (no color)
         if has_brightness and not self._supported_color_modes:
             self._supported_color_modes.add(ColorMode.BRIGHTNESS)
             _LOGGER.warning(f"   ├─ Brightness-only light (no color)")
+
         # Fallback to on/off only
         if not self._supported_color_modes:
             self._supported_color_modes.add(ColorMode.ONOFF)
@@ -123,10 +123,10 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
     @property
     def brightness(self) -> Optional[int]:
         """Return the brightness of this light between 0..255."""
-        if not self._brightness_dpid or self._brightness_dpid not in self.coordinator.data:
+        if BRIGHT not in self.coordinator.data:
             return None
         # Device returns 0-1000, HA uses 0-255
-        device_brightness = self.coordinator.data[self._brightness_dpid]
+        device_brightness = self.coordinator.data[BRIGHT]
         return int((device_brightness / 1000) * 255)
 
     @property
@@ -144,7 +144,7 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
             return ColorMode.HS
         if ColorMode.COLOR_TEMP in self._supported_color_modes and TEMP in self.coordinator.data:
             return ColorMode.COLOR_TEMP
-        if ColorMode.BRIGHTNESS in self._supported_color_modes and self._brightness_dpid and self._brightness_dpid in self.coordinator.data:
+        if ColorMode.BRIGHTNESS in self._supported_color_modes and BRIGHT in self.coordinator.data:
              return ColorMode.BRIGHTNESS
         return ColorMode.ONOFF
 
@@ -186,25 +186,27 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
         """Turn the light on."""
         payload: Dict[str, Any] = {SWITCH: 1}
 
-        if ATTR_BRIGHTNESS in kwargs and self._brightness_dpid and self._brightness_dpid in self.coordinator.device.dpid:
+        # Set work mode to 0 (white/default mode) at the start, like the original integration
+        if WORK_MODE in self.coordinator.device.dpid:
+            payload[WORK_MODE] = 0
+
+        if ATTR_BRIGHTNESS in kwargs and BRIGHT in self.coordinator.device.dpid:
             ha_brightness = kwargs[ATTR_BRIGHTNESS]
             # Convert HA's 0-255 to device's 0-1000
-            payload[self._brightness_dpid] = int((ha_brightness / 255) * 1000)
+            payload[BRIGHT] = int((ha_brightness / 255) * 1000)
 
         if ATTR_HS_COLOR in kwargs and HUE in self.coordinator.device.dpid and SAT in self.coordinator.device.dpid:
             hs_color = kwargs[ATTR_HS_COLOR]
-            # Set work mode to color (assuming 1)
-            if WORK_MODE in self.coordinator.device.dpid:
-                payload[WORK_MODE] = 1
+            # Do RGB round-trip conversion for color correction (like original integration)
+            r, g, b = color_hs_to_RGB(*hs_color)
+            hs_color = color_RGB_to_hs(r, g, b)
             # Convert HA's Hue 0-360, Sat 0-100 to device's Hue 0-360, Sat 0-1000
-            payload[HUE] = int(hs_color[0])
-            payload[SAT] = int(hs_color[1] * 10)
+            payload[HUE] = round(hs_color[0])
+            payload[SAT] = round(hs_color[1] * 10)
 
-        if ATTR_COLOR_TEMP_KELVIN in kwargs and TEMP in self.coordinator.device.dpid and self._brightness_dpid != BRIGHT_ALT:
+        if ATTR_COLOR_TEMP_KELVIN in kwargs and TEMP in self.coordinator.device.dpid:
             ha_kelvin = kwargs[ATTR_COLOR_TEMP_KELVIN]
-            # Set work mode to white (assuming 0)
-            if WORK_MODE in self.coordinator.device.dpid:
-                payload[WORK_MODE] = 0
+            # Work mode is already set to 0 above
             # Convert HA's Kelvin to device's 0-1000 scale
             normalized_val = (ha_kelvin - MIN_KELVIN) / (MAX_KELVIN - MIN_KELVIN)
             payload[TEMP] = int(normalized_val * 1000)

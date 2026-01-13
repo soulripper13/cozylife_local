@@ -133,15 +133,13 @@ DPIDs (Data Point IDs) are the functions your device supports. Common DPIDs incl
 | DPID | Function | Description |
 |------|----------|-------------|
 | `1` | Power Switch | Turn device on/off |
-| `2` | Work Mode | Switch between color/white modes |
-| `3` | Color Temperature **OR** Brightness | Depends on device model |
-| `4` | Brightness | Standard brightness control |
-| `5` | Hue | RGB color (Hue component) |
-| `6` | Saturation | RGB color (Saturation component) |
+| `2` | Work Mode | Switch between color/white modes (0=white, 1=color) |
+| `3` | Color Temperature | Warm to cool white (2000K-6500K) |
+| `4` | Brightness | Brightness level (0-100%) |
+| `5` | Hue | RGB color hue (0-360°) |
+| `6` | Saturation | RGB color saturation (0-100%) |
 | `7` | Color | Alternative color control |
 | `8` | Scene | Scene/effect mode |
-
-**Important:** Some devices (especially LED strips with PID `d50v0i`) use DPID `3` for brightness instead of color temperature. The integration automatically detects this.
 
 ### Understanding Device Type Codes
 
@@ -192,21 +190,31 @@ It is expected to work with a wide range of CozyLife devices that use the local 
 
 ### My LED strip only shows on/off, no brightness control
 
-**Solution:** This was a known issue with devices that use DPID `3` for brightness (like PID: `d50v0i`). Update to the latest version of the integration which includes:
-- Automatic detection of alternative DPID mappings
+**Solution:** This was a known issue with RGB lights (Type Code `02`) not being recognized. Update to the latest version of the integration which includes:
 - Support for Device Type Code `02` (RGB lights)
+- Correct DPID mapping (DPID 4 = brightness, DPID 3 = color temperature)
 
 Check your logs for:
 ```
 Device Type Code: 02
 Device Category: RGB Light
-✓ Brightness: DPID 3 (or DPID 4)
-Supported modes: brightness, hs
+✓ Brightness: DPID 4
+✓ RGB Color: DPIDs 5 (Hue) + 6 (Saturation)
+Supported modes: color_temp, hs
 ```
 
 If you still see your RGB light set up as a switch instead of a light, check the Device Type Code. If it's `02`, you need to update to the latest version of the integration.
 
 If you see `ON/OFF only`, please [open an issue](https://github.com/soulripper13/cozylife_local/issues) with your device's log output.
+
+### LED strip blinks dark blue when changing colors
+
+**Solution:** This was a known issue with incorrect work mode and DPID handling. Update to version 0.2.2 or later which includes:
+- Fixed work mode handling for RGB color changes (keeps work mode at 0)
+- Corrected DPID mappings to match CozyLife protocol standard
+- Added RGB color correction for accurate color reproduction
+
+The issue was caused by setting work mode to 1 when changing colors, when it should remain at 0. This has been fixed to match the correct protocol behavior.
 
 ### How do I find my device's IP address?
 

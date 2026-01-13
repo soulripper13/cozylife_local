@@ -63,7 +63,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         dpid_explanations = {
             '1': 'Power Switch',
             '2': 'Work Mode (Color/White)',
-            '3': 'Color Temperature OR Brightness (device dependent)',
+            '3': 'Color Temperature',
             '4': 'Brightness',
             '5': 'Hue (Color)',
             '6': 'Saturation (Color)',
