@@ -26,7 +26,7 @@ async def async_setup_entry(
     coordinator: CozyLifeCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
     if not coordinator.device.dpid:
-        _LOGGER.error(f"❌ Missing DPID list for {coordinator.device.ip_address}. Cannot set up switch.")
+        _LOGGER.error(f"Missing DPID list for {coordinator.device.ip_address}. Cannot set up switch.")
         return
 
     # Do not create switches for devices that are explicitly lights.
@@ -37,18 +37,13 @@ async def async_setup_entry(
     entities = []
     # Check if the primary bitmask DPID is supported by the device.
     if BITMASK_DPID in coordinator.device.dpid:
-        _LOGGER.warning(f"🔌 Setting up SWITCH entities for {coordinator.device.device_model_name}")
-        _LOGGER.warning(f"   ├─ Switch type: {NUM_GANGS}-gang")
-        _LOGGER.warning(f"   ├─ DPIDs: {coordinator.device.dpid}")
-        _LOGGER.warning(f"   ├─ Using DPID {BITMASK_DPID} for bitmask control")
         # Create an entity for each gang of the double rocker switch.
         for i in range(NUM_GANGS):
             entities.append(CozyLifeSwitch(coordinator, gang_bit=i))
-        _LOGGER.warning(f"   └─ Created {NUM_GANGS} switch entities (Gang 1 to Gang {NUM_GANGS})")
     else:
-        _LOGGER.warning(
-            f"⚠️  No switch entities created for device {coordinator.device.device_model_name}. "
-            f"The required bitmask DPID '{BITMASK_DPID}' was not found in device DPIDs: {coordinator.device.dpid}"
+        _LOGGER.info(
+            f"No switch entities created for device {coordinator.device.ip_address}. "
+            f"The required bitmask DPID '{BITMASK_DPID}' was not found in the device's reported DPIDs: {coordinator.device.dpid}."
         )
 
     if entities:

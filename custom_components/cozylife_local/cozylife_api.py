@@ -46,7 +46,6 @@ class CozyLifeDevice:
         self._device_model_name: Optional[str] = None
         self._dpid: Optional[List[str]] = None
         self._device_type_code: Optional[str] = None
-        self._lock = asyncio.Lock()  # Prevent concurrent network operations
 
     @property
     def ip_address(self) -> str:
@@ -104,58 +103,57 @@ class CozyLifeDevice:
         This method will loop and read messages from the socket until a response
         with a matching sequence number (sn) is found or a timeout occurs.
         """
-        async with self._lock:  # Ensure only one network operation at a time
-            try:
-                await self._connect()
-                message = self._create_message(cmd, payload)
-                sent_sn = message.get('sn')
-                encoded_message = (json.dumps(message, separators=(',', ':')) + "\r\n").encode('utf8')
+        try:
+            await self._connect()
+            message = self._create_message(cmd, payload)
+            sent_sn = message.get('sn')
+            encoded_message = (json.dumps(message, separators=(',', ':')) + "\r\n").encode('utf8')
+            
+            _LOGGER.debug(f"Sending to {self._ip_address}: {encoded_message!r}")
+            self._writer.write(encoded_message)
+            await self._writer.drain()
 
-                _LOGGER.debug(f"Sending to {self._ip_address}: {encoded_message!r}")
-                self._writer.write(encoded_message)
-                await self._writer.drain()
-
-                end_time = time.monotonic() + self._timeout
-                while time.monotonic() < end_time:
-                    try:
-                        remaining_time = end_time - time.monotonic()
-                        if remaining_time <= 0:
-                            raise asyncio.TimeoutError
-
-                        response_data = await asyncio.wait_for(self._reader.readline(), timeout=remaining_time)
-
-                        if not response_data:
-                            _LOGGER.debug(f"Connection closed by {self._ip_address} while waiting for response.")
-                            self._disconnect()
-                            return None
-
-                        _LOGGER.debug(f"Received from {self._ip_address}: {response_data!r}")
-                        resp_json = json.loads(response_data.decode('utf8').strip())
-
-                        if resp_json.get('sn') == sent_sn:
-                            if resp_json.get('res') == 0:
-                                return resp_json.get('msg')
-                            else:
-                                _LOGGER.warning(f"Received error response for sn {sent_sn}: {resp_json}")
-                                return None
-                        else:
-                            _LOGGER.debug(f"Discarding message with mismatched sn: {resp_json}")
-
-                    except asyncio.TimeoutError:
-                        _LOGGER.warning(f"Timeout waiting for response with sn {sent_sn} from {self._ip_address}")
+            end_time = time.monotonic() + self._timeout
+            while time.monotonic() < end_time:
+                try:
+                    remaining_time = end_time - time.monotonic()
+                    if remaining_time <= 0:
+                        raise asyncio.TimeoutError
+                    
+                    response_data = await asyncio.wait_for(self._reader.readline(), timeout=remaining_time)
+                    
+                    if not response_data:
+                        _LOGGER.debug(f"Connection closed by {self._ip_address} while waiting for response.")
+                        self._disconnect()
                         return None
-                    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                        _LOGGER.warning(f"Error decoding response from {self._ip_address}: {e} - Data: {response_data!r}")
 
-                _LOGGER.warning(f"Outer loop timeout for sn {sent_sn}, no matching response received.")
-                return None
+                    _LOGGER.debug(f"Received from {self._ip_address}: {response_data!r}")
+                    resp_json = json.loads(response_data.decode('utf8').strip())
 
-            except (ConnectionRefusedError, OSError) as e:
-                _LOGGER.error(f"Communication error with {self._ip_address}: {e}")
-                self._disconnect()
-                return None
-            finally:
-                self._disconnect()
+                    if resp_json.get('sn') == sent_sn:
+                        if resp_json.get('res') == 0:
+                            return resp_json.get('msg')
+                        else:
+                            _LOGGER.warning(f"Received error response for sn {sent_sn}: {resp_json}")
+                            return None
+                    else:
+                        _LOGGER.debug(f"Discarding message with mismatched sn: {resp_json}")
+
+                except asyncio.TimeoutError:
+                    _LOGGER.warning(f"Timeout waiting for response with sn {sent_sn} from {self._ip_address}")
+                    return None
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                    _LOGGER.warning(f"Error decoding response from {self._ip_address}: {e} - Data: {response_data!r}")
+
+            _LOGGER.warning(f"Outer loop timeout for sn {sent_sn}, no matching response received.")
+            return None
+
+        except (ConnectionRefusedError, OSError) as e:
+            _LOGGER.error(f"Communication error with {self._ip_address}: {e}")
+            self._disconnect()
+            return None
+        finally:
+            self._disconnect()
 
     def _create_message(self, cmd: int, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Helper to create the JSON message structure."""
@@ -202,7 +200,7 @@ class CozyLifeDevice:
         self._dpid = [str(dpid) for dpid in query_msg['attr']]
 
         _LOGGER.info(
-            f"Device query successful - {self._ip_address}: "
+            f"Successfully discovered device {self._ip_address} locally: "
             f"DID={self.device_id}, PID={self.pid}, Type={self.device_type_code}, DPIDs={self.dpid}"
         )
         return True
