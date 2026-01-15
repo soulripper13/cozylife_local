@@ -15,6 +15,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util.color import (
     color_temperature_kelvin_to_mired as kelvin_to_mired,
     color_temperature_mired_to_kelvin as mired_to_kelvin,
+    color_hs_to_RGB,
+    color_RGB_to_hs,
 )
 
 
@@ -157,30 +159,29 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
-        payload: Dict[str, Any] = {SWITCH: 1}
+        # Match original integration: start with power=255, work_mode=0
+        payload: Dict[str, Any] = {SWITCH: 255, WORK_MODE: 0}
 
         if ATTR_BRIGHTNESS in kwargs and BRIGHT in self.coordinator.device.dpid:
             ha_brightness = kwargs[ATTR_BRIGHTNESS]
-            # Convert HA's 0-255 to device's 0-1000
-            payload[BRIGHT] = int((ha_brightness / 255) * 1000)
+            # Convert HA's 0-255 to device's 0-1000 (use round like original)
+            payload[BRIGHT] = round(ha_brightness / 255 * 1000)
 
         if ATTR_HS_COLOR in kwargs and HUE in self.coordinator.device.dpid and SAT in self.coordinator.device.dpid:
             hs_color = kwargs[ATTR_HS_COLOR]
-            # Set work mode to color (assuming 1)
-            if WORK_MODE in self.coordinator.device.dpid:
-                payload[WORK_MODE] = 1
+            # Do RGB round-trip conversion for color correction (from original integration)
+            r, g, b = color_hs_to_RGB(*hs_color)
+            hs_color = color_RGB_to_hs(r, g, b)
             # Convert HA's Hue 0-360, Sat 0-100 to device's Hue 0-360, Sat 0-1000
-            payload[HUE] = int(hs_color[0])
-            payload[SAT] = int(hs_color[1] * 10)
+            payload[HUE] = round(hs_color[0])
+            payload[SAT] = round(hs_color[1] * 10)
 
         if ATTR_COLOR_TEMP_KELVIN in kwargs and TEMP in self.coordinator.device.dpid:
             ha_kelvin = kwargs[ATTR_COLOR_TEMP_KELVIN]
-            # Set work mode to white (assuming 0)
-            if WORK_MODE in self.coordinator.device.dpid:
-                payload[WORK_MODE] = 0
+            # Work mode already set to 0 above
             # Convert HA's Kelvin to device's 0-1000 scale
             normalized_val = (ha_kelvin - MIN_KELVIN) / (MAX_KELVIN - MIN_KELVIN)
-            payload[TEMP] = int(normalized_val * 1000)
+            payload[TEMP] = round(normalized_val * 1000)
 
         await self.coordinator.device.async_set_state(payload)
         await self.coordinator.async_request_refresh()
