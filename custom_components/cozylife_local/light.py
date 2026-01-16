@@ -52,12 +52,22 @@ async def async_setup_entry(
         return
 
     # Distinguish switches from lights using DPID patterns:
-    # - Switches: Have DPID '5' (normal_time_2) but NOT DPID '6'
-    # - RGB Lights: Have both DPID '5' (hue_value) AND DPID '6' (sat_value)
-    # This is reliable because RGB lights always have saturation if they have hue.
-    has_dpid_5 = HUE in coordinator.device.dpid  # HUE='5' in const.py
-    has_dpid_6 = SAT in coordinator.device.dpid  # SAT='6' in const.py
+    # Pattern 1: Switches with 2+ gangs have DPID 2 and 4 but NOT 3
+    #   - Switch: DPIDs [1, 2, 4] (countdown timers at even positions)
+    #   - Light: DPIDs [1, 2, 3, 4] (sequential: switch, work_mode, temp, bright)
+    # Pattern 2: RGB lights have both DPID 5 (hue) AND 6 (saturation) together
+    has_dpid_2 = WORK_MODE in coordinator.device.dpid  # WORK_MODE='2'
+    has_dpid_3 = TEMP in coordinator.device.dpid       # TEMP='3'
+    has_dpid_4 = BRIGHT in coordinator.device.dpid     # BRIGHT='4'
+    has_dpid_5 = HUE in coordinator.device.dpid        # HUE='5'
+    has_dpid_6 = SAT in coordinator.device.dpid        # SAT='6'
 
+    # Check for switch pattern: has DPID 2 and 4 but NOT 3 (multi-gang switch)
+    if has_dpid_2 and has_dpid_4 and not has_dpid_3:
+        _LOGGER.debug(f"Device {coordinator.device.ip_address} has DPIDs 2,4 but not 3, indicating it's a multi-gang switch, skipping light platform setup.")
+        return
+
+    # Check for switch pattern: has DPID 5 but NOT 6 (switch with timers)
     if has_dpid_5 and not has_dpid_6:
         _LOGGER.debug(f"Device {coordinator.device.ip_address} has DPID 5 but not DPID 6, indicating it's a switch (not a light), skipping light platform setup.")
         return
