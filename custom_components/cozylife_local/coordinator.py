@@ -35,6 +35,7 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                     raise UpdateFailed(f"Failed to get full device info for {self.device.ip_address}")
 
             # Query the current state of the device
+            _LOGGER.debug(f"Polling device {self.device.ip_address} for state update...")
             state_data = await self.device.async_get_state()
             if state_data is None:
                 raise UpdateFailed(f"Failed to query state from device {self.device.ip_address}")
@@ -42,4 +43,5 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             _LOGGER.debug(f"Successfully fetched state for {self.device.ip_address}: {state_data}")
             return state_data
         except Exception as err:
+            _LOGGER.error(f"Error communicating with device {self.device.ip_address}: {err}")
             raise UpdateFailed(f"Error communicating with device {self.device.ip_address}: {err}") from err
