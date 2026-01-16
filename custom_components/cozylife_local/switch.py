@@ -14,8 +14,8 @@ _LOGGER = logging.getLogger(__name__)
 
 # The DPID used for controlling all switch gangs via a bitmask.
 BITMASK_DPID = '1'
-# For a double rocker switch, we will create entities for the first two gangs (bits 0 and 1).
-NUM_GANGS = 2
+# Countdown timer DPIDs for each gang (gang 1-8)
+COUNTDOWN_DPIDS = ['2', '4', '6', '8', '10', '12', '14', '16']
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -29,23 +29,20 @@ async def async_setup_entry(
         _LOGGER.error(f"Missing DPID list for {coordinator.device.ip_address}. Cannot set up switch.")
         return
 
-    # Import WORK_MODE from const to distinguish switches from lights
-    from .const import WORK_MODE, BRIGHT, TEMP, HUE, SAT
-
-    # Check if this device is actually a light (has WORK_MODE or light-specific features)
-    # Lights have WORK_MODE for switching between color/white modes; switches don't
-    has_work_mode = WORK_MODE in coordinator.device.dpid
-    has_light_features = any(dpid in coordinator.device.dpid for dpid in [BRIGHT, TEMP, HUE, SAT])
-
-    if has_work_mode or has_light_features:
-        _LOGGER.debug(f"Device {coordinator.device.ip_address} appears to be a light (has WORK_MODE or light features), skipping switch setup.")
-        return
-
     entities = []
     # Check if the primary bitmask DPID is supported by the device.
     if BITMASK_DPID in coordinator.device.dpid:
-        # Create an entity for each gang of the double rocker switch.
-        for i in range(NUM_GANGS):
+        # Auto-detect number of gangs by counting countdown timer DPIDs
+        num_gangs = sum(1 for dpid in COUNTDOWN_DPIDS if dpid in coordinator.device.dpid)
+
+        if num_gangs == 0:
+            # Fallback: assume 1 gang if no countdown DPIDs found
+            num_gangs = 1
+
+        _LOGGER.info(f"Detected {num_gangs}-gang switch at {coordinator.device.ip_address} with DPIDs: {coordinator.device.dpid}")
+
+        # Create an entity for each gang
+        for i in range(num_gangs):
             entities.append(CozyLifeSwitch(coordinator, gang_bit=i))
     else:
         _LOGGER.info(

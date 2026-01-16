@@ -51,15 +51,15 @@ async def async_setup_entry(
         _LOGGER.error(f"Missing device DPID or model name for {coordinator.device.ip_address}. Cannot set up light.")
         return
 
-    # Check if this is a switch device (has DPID '1' but no WORK_MODE and no light features)
-    # Switches have bitmask control (DPID '1') but lack WORK_MODE and brightness/color controls
-    # Lights always have WORK_MODE for switching between color/white modes
-    has_bitmask = SWITCH in coordinator.device.dpid
-    has_work_mode = WORK_MODE in coordinator.device.dpid
-    has_light_features = any(dpid in coordinator.device.dpid for dpid in [BRIGHT, TEMP, HUE, SAT])
+    # Distinguish switches from lights using DPID patterns:
+    # - Switches: Have DPID '5' (normal_time_2) but NOT DPID '6'
+    # - RGB Lights: Have both DPID '5' (hue_value) AND DPID '6' (sat_value)
+    # This is reliable because RGB lights always have saturation if they have hue.
+    has_dpid_5 = HUE in coordinator.device.dpid  # HUE='5' in const.py
+    has_dpid_6 = SAT in coordinator.device.dpid  # SAT='6' in const.py
 
-    if has_bitmask and not has_work_mode and not has_light_features:
-        _LOGGER.debug(f"Device {coordinator.device.ip_address} appears to be a switch (has DPID '1' but no WORK_MODE or light features), skipping light platform setup.")
+    if has_dpid_5 and not has_dpid_6:
+        _LOGGER.debug(f"Device {coordinator.device.ip_address} has DPID 5 but not DPID 6, indicating it's a switch (not a light), skipping light platform setup.")
         return
 
     if coordinator.device.device_type_code not in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]:
