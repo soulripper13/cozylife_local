@@ -93,7 +93,8 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
     @property
     def is_on(self) -> Optional[bool]:
         """Return true if light is on."""
-        return self.coordinator.data.get(SWITCH) == 1
+        # Original integration checks if value > 0, since we send 255 when turning on
+        return self.coordinator.data.get(SWITCH, 0) > 0
 
     @property
     def brightness(self) -> Optional[int]:
@@ -107,20 +108,23 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
     @property
     def color_mode(self) -> Optional[ColorMode]:
         """Return the color mode of the light."""
-        # WORK_MODE '2' often determines if the light is in white or color mode
-        work_mode = self.coordinator.data.get(WORK_MODE)
-        if work_mode == 1 and ColorMode.HS in self._supported_color_modes: # Assuming 1 is color mode
-             return ColorMode.HS
-        if work_mode == 0 and ColorMode.COLOR_TEMP in self._supported_color_modes: # Assuming 0 is white mode
-            return ColorMode.COLOR_TEMP
-        
-        # Fallback if work_mode is not present
-        if ColorMode.HS in self._supported_color_modes and HUE in self.coordinator.data:
+        # The original integration determines color mode based on which values are valid (< 60000)
+        # not just based on work_mode. This is critical for proper UI updates.
+
+        # Check if we have valid color values (< 60000)
+        if (HUE in self.coordinator.data and SAT in self.coordinator.data and
+            self.coordinator.data[HUE] < 60000):
             return ColorMode.HS
-        if ColorMode.COLOR_TEMP in self._supported_color_modes and TEMP in self.coordinator.data:
+
+        # Check if we have valid color temp values (< 60000)
+        if TEMP in self.coordinator.data and self.coordinator.data[TEMP] < 60000:
             return ColorMode.COLOR_TEMP
+
+        # Check if we have brightness control
         if ColorMode.BRIGHTNESS in self._supported_color_modes and BRIGHT in self.coordinator.data:
-             return ColorMode.BRIGHTNESS
+            return ColorMode.BRIGHTNESS
+
+        # Fallback to on/off
         return ColorMode.ONOFF
 
     @property
@@ -132,16 +136,24 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
     def hs_color(self) -> Optional[tuple[float, float]]:
         """Return the hs color value."""
         if HUE not in self.coordinator.data or SAT not in self.coordinator.data:
-            _LOGGER.debug(f"hs_color: HUE or SAT not in coordinator.data. Data keys: {self.coordinator.data.keys()}")
+            _LOGGER.info(f"[COZYLIFE] hs_color: HUE or SAT not in coordinator.data. Data keys: {self.coordinator.data.keys()}")
             return None
+
+        # Check if color value is valid (< 60000). Device sends 65535 when in white mode.
+        # This matches the original integration's validation logic.
+        color_value = self.coordinator.data[HUE]
+        if color_value >= 60000:
+            _LOGGER.info(f"[COZYLIFE] hs_color: Color value {color_value} >= 60000, ignoring (device in white mode)")
+            return None
+
         # Device sends Hue 0-360, Saturation 0-1000
         # Do RGB round-trip conversion for consistency (matches original integration)
         hue = round(self.coordinator.data[HUE])
         saturation = round(self.coordinator.data[SAT] / 10)
-        _LOGGER.debug(f"hs_color: Device values - hue={hue}, sat={saturation}, raw_sat={self.coordinator.data[SAT]}")
+        _LOGGER.info(f"[COZYLIFE] hs_color: Device values - hue={hue}, sat={saturation}, raw_sat={self.coordinator.data[SAT]}")
         r, g, b = color_hs_to_RGB(hue, saturation)
         hs_color = color_RGB_to_hs(r, g, b)
-        _LOGGER.debug(f"hs_color: After RGB conversion - hs_color={hs_color}")
+        _LOGGER.info(f"[COZYLIFE] hs_color: After RGB conversion - hs_color={hs_color}")
         return hs_color
 
     @property
@@ -149,9 +161,16 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
         """Return the color temperature in Kelvin."""
         if TEMP not in self.coordinator.data:
             return None
+
+        # Check if color temp value is valid (< 60000). Device sends 65535 when in color mode.
+        # This matches the original integration's validation logic.
+        temp_value = self.coordinator.data[TEMP]
+        if temp_value >= 60000:
+            _LOGGER.info(f"[COZYLIFE] color_temp_kelvin: Temp value {temp_value} >= 60000, ignoring (device in color mode)")
+            return None
+
         # Convert device's 0-1000 scale to Kelvin 2000-6500 scale
-        device_val = self.coordinator.data[TEMP]
-        return int(((device_val / 1000) * (MAX_KELVIN - MIN_KELVIN)) + MIN_KELVIN)
+        return int(((temp_value / 1000) * (MAX_KELVIN - MIN_KELVIN)) + MIN_KELVIN)
 
     @property
     def min_color_temp_kelvin(self) -> int:
@@ -201,4 +220,5 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
+        _LOGGER.info(f"[COZYLIFE] Light entity {self.name} received coordinator update. Data: {self.coordinator.data}")
         self.async_write_ha_state()
