@@ -29,9 +29,16 @@ async def async_setup_entry(
         _LOGGER.error(f"Missing DPID list for {coordinator.device.ip_address}. Cannot set up switch.")
         return
 
-    # Do not create switches for devices that are explicitly lights.
-    if coordinator.device.device_type_code in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]:
-        _LOGGER.info(f"Device {coordinator.device.ip_address} (Type: {coordinator.device.device_type_code}) is a light, skipping switch setup.")
+    # Import WORK_MODE from const to distinguish switches from lights
+    from .const import WORK_MODE, BRIGHT, TEMP, HUE, SAT
+
+    # Check if this device is actually a light (has WORK_MODE or light-specific features)
+    # Lights have WORK_MODE for switching between color/white modes; switches don't
+    has_work_mode = WORK_MODE in coordinator.device.dpid
+    has_light_features = any(dpid in coordinator.device.dpid for dpid in [BRIGHT, TEMP, HUE, SAT])
+
+    if has_work_mode or has_light_features:
+        _LOGGER.debug(f"Device {coordinator.device.ip_address} appears to be a light (has WORK_MODE or light features), skipping switch setup.")
         return
 
     entities = []

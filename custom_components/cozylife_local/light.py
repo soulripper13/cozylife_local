@@ -46,15 +46,26 @@ async def async_setup_entry(
 ):
     """Set up CozyLife light platform."""
     coordinator: CozyLifeCoordinator = hass.data[DOMAIN][config_entry.entry_id]
-    
-    if coordinator.device.device_type_code not in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]:
-        _LOGGER.debug(f"Device {coordinator.device.ip_address} (Type: {coordinator.device.device_type_code}) is not a light, skipping light platform setup.")
-        return
 
     if coordinator.device.dpid is None or coordinator.device.device_model_name is None:
         _LOGGER.error(f"Missing device DPID or model name for {coordinator.device.ip_address}. Cannot set up light.")
         return
-    
+
+    # Check if this is a switch device (has DPID '1' but no WORK_MODE and no light features)
+    # Switches have bitmask control (DPID '1') but lack WORK_MODE and brightness/color controls
+    # Lights always have WORK_MODE for switching between color/white modes
+    has_bitmask = SWITCH in coordinator.device.dpid
+    has_work_mode = WORK_MODE in coordinator.device.dpid
+    has_light_features = any(dpid in coordinator.device.dpid for dpid in [BRIGHT, TEMP, HUE, SAT])
+
+    if has_bitmask and not has_work_mode and not has_light_features:
+        _LOGGER.debug(f"Device {coordinator.device.ip_address} appears to be a switch (has DPID '1' but no WORK_MODE or light features), skipping light platform setup.")
+        return
+
+    if coordinator.device.device_type_code not in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]:
+        _LOGGER.debug(f"Device {coordinator.device.ip_address} (Type: {coordinator.device.device_type_code}) is not a light, skipping light platform setup.")
+        return
+
     async_add_entities([CozyLifeLight(coordinator)], True)
 
 class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
