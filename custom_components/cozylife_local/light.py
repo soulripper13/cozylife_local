@@ -133,10 +133,13 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
         """Return the hs color value."""
         if HUE not in self.coordinator.data or SAT not in self.coordinator.data:
             return None
-        # Assuming device sends Hue 0-360, Saturation 0-1000. Normalize to HA's format.
-        hue = self.coordinator.data[HUE]
-        saturation = self.coordinator.data[SAT] / 10
-        return (hue, saturation)
+        # Device sends Hue 0-360, Saturation 0-1000
+        # Do RGB round-trip conversion for consistency (matches original integration)
+        hue = round(self.coordinator.data[HUE])
+        saturation = round(self.coordinator.data[SAT] / 10)
+        r, g, b = color_hs_to_RGB(hue, saturation)
+        hs_color = color_RGB_to_hs(r, g, b)
+        return hs_color
 
     @property
     def color_temp_kelvin(self) -> Optional[int]:
