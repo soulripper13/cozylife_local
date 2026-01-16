@@ -1,7 +1,7 @@
 {
   "domain": "cozylife_local",
   "name": "CozyLife Local",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "codeowners": ["@soulripper13"],
   "config_flow": true,
   "documentation": "https://github.com/soulripper13/cozylife_local",
