@@ -132,13 +132,16 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
     def hs_color(self) -> Optional[tuple[float, float]]:
         """Return the hs color value."""
         if HUE not in self.coordinator.data or SAT not in self.coordinator.data:
+            _LOGGER.debug(f"hs_color: HUE or SAT not in coordinator.data. Data keys: {self.coordinator.data.keys()}")
             return None
         # Device sends Hue 0-360, Saturation 0-1000
         # Do RGB round-trip conversion for consistency (matches original integration)
         hue = round(self.coordinator.data[HUE])
         saturation = round(self.coordinator.data[SAT] / 10)
+        _LOGGER.debug(f"hs_color: Device values - hue={hue}, sat={saturation}, raw_sat={self.coordinator.data[SAT]}")
         r, g, b = color_hs_to_RGB(hue, saturation)
         hs_color = color_RGB_to_hs(r, g, b)
+        _LOGGER.debug(f"hs_color: After RGB conversion - hs_color={hs_color}")
         return hs_color
 
     @property
