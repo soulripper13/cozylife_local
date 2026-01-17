@@ -29,6 +29,30 @@ async def async_setup_entry(
         _LOGGER.error(f"Missing DPID list for {coordinator.device.ip_address}. Cannot set up switch.")
         return
 
+    # Skip devices that are lights by checking for light-specific DPIDs
+    # - DPID '3' (TEMP - color temperature) exists in dimmable/RGB lights, never in switches
+    # - DPID '6' (SAT - saturation) exists in RGB lights, never in switches
+    # - Multi-gang switches have DPID '2' and '4' (countdown timers), but simple lights only have '2'
+    # DO NOT check device type code here - switches often report incorrect type codes
+    from .const import TEMP, SAT, WORK_MODE, BRIGHT, LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE
+
+    has_work_mode = WORK_MODE in coordinator.device.dpid  # WORK_MODE='2'
+    has_temp = TEMP in coordinator.device.dpid            # TEMP='3'
+    has_bright = BRIGHT in coordinator.device.dpid        # BRIGHT='4'
+    has_saturation = SAT in coordinator.device.dpid       # SAT='6'
+    is_light_type = coordinator.device.device_type_code in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]
+
+    # Definitive light indicators: has temp or saturation
+    if has_temp or has_saturation:
+        _LOGGER.debug(f"Device {coordinator.device.ip_address} has light-specific DPIDs (TEMP='3' or SAT='6'), skipping switch platform setup.")
+        return
+
+    # Simple light case: has DPID 2 (work_mode) but not DPID 4 (brightness/countdown_2)
+    # AND reports light type code - this is a simple on/off light
+    if has_work_mode and not has_bright and is_light_type:
+        _LOGGER.debug(f"Device {coordinator.device.ip_address} appears to be a simple light (has DPID 2 but not 4, with light type code), skipping switch platform setup.")
+        return
+
     entities = []
     # Check if the primary bitmask DPID is supported by the device.
     if BITMASK_DPID in coordinator.device.dpid:
