@@ -50,6 +50,12 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user", data_schema=DATA_SCHEMA, errors=errors
         )
     
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        """Get the options flow for this handler."""
+        return CozyLifeOptionsFlow(config_entry)
+
     async def _async_create_entry_from_ip(self, ip_address: str) -> FlowResult:
         """Helper to create a config entry from a single IP address."""
         errors: Dict[str, str] = {}
@@ -82,12 +88,19 @@ class CozyLifeOptionsFlow(config_entries.OptionsFlow):
 
     def __init__(self, config_entry: config_entries.ConfigEntry):
         """Initialize CozyLife options flow."""
-        self.config_entry = config_entry
+        self._config_entry = config_entry
 
     async def async_step_init(self, user_input: Optional[Dict[str, Any]] = None) -> FlowResult:
         """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({
+                vol.Optional(
+                    "enable_debug",
+                    default=self._config_entry.options.get("enable_debug", False)
+                ): bool,
             })
         )

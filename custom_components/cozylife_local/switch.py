@@ -34,17 +34,23 @@ async def async_setup_entry(
     # - DPID '6' (SAT - saturation) exists in RGB lights, never in switches
     # - Multi-gang switches have DPID '2' and '4' (countdown timers), but simple lights only have '2'
     # DO NOT check device type code here - switches often report incorrect type codes
-    from .const import TEMP, SAT, WORK_MODE, BRIGHT, LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE
+    from .const import TEMP, SAT, WORK_MODE, BRIGHT, HUE, LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE
 
     has_work_mode = WORK_MODE in coordinator.device.dpid  # WORK_MODE='2'
     has_temp = TEMP in coordinator.device.dpid            # TEMP='3'
     has_bright = BRIGHT in coordinator.device.dpid        # BRIGHT='4'
+    has_hue = HUE in coordinator.device.dpid              # HUE='5'
     has_saturation = SAT in coordinator.device.dpid       # SAT='6'
     is_light_type = coordinator.device.device_type_code in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]
 
-    # Definitive light indicators: has temp or saturation
-    if has_temp or has_saturation:
-        _LOGGER.debug(f"Device {coordinator.device.ip_address} has light-specific DPIDs (TEMP='3' or SAT='6'), skipping switch platform setup.")
+    # Definitive light indicators:
+    # 1. Has TEMP (3) -> CCT Light
+    # 2. Has SAT (6) AND HUE (5) -> RGB Light
+    #    (Note: DPID 6 is also 'countdown_3' for switches.
+    #     Standard 3-gang switches have 6 but NOT 5.
+    #     If a device has both 5 and 6, we check the type code to be sure it's not an advanced switch.)
+    if has_temp or (has_saturation and has_hue and is_light_type):
+        _LOGGER.debug(f"Device {coordinator.device.ip_address} has light-specific DPIDs (TEMP='3' or SAT='6'+HUE='5'+Type='Light'), skipping switch platform setup.")
         return
 
     # Simple light case: has DPID 2 (work_mode) but not DPID 4 (brightness/countdown_2)
