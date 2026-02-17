@@ -3,6 +3,7 @@ import logging
 from datetime import timedelta
 from typing import Any, Dict, Optional
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -15,13 +16,14 @@ UPDATE_INTERVAL = timedelta(seconds=30)  # How often to poll the device
 class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
     """Manages fetching data from a single CozyLife device."""
 
-    def __init__(self, hass: HomeAssistant, device: CozyLifeDevice):
+    def __init__(self, hass: HomeAssistant, device: CozyLifeDevice, entry: ConfigEntry):
         """Initialize coordinator."""
         super().__init__(
             hass,
             _LOGGER,
             name=f"CozyLife device {device.ip_address}",
             update_interval=UPDATE_INTERVAL,
+            config_entry=entry,
         )
         self.device = device
 
@@ -35,12 +37,12 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                     raise UpdateFailed(f"Failed to get full device info for {self.device.ip_address}")
 
             # Query the current state of the device
-            _LOGGER.info(f"[COZYLIFE] Polling device {self.device.ip_address} for state update...")
+            _LOGGER.debug(f"[COZYLIFE] Polling device {self.device.ip_address} for state update...")
             state_data = await self.device.async_get_state()
             if state_data is None:
                 raise UpdateFailed(f"Failed to query state from device {self.device.ip_address}")
 
-            _LOGGER.info(f"[COZYLIFE] Successfully fetched state for {self.device.ip_address}: {state_data}")
+            _LOGGER.debug(f"[COZYLIFE] Successfully fetched state for {self.device.ip_address}: {state_data}")
             return state_data
         except Exception as err:
             _LOGGER.error(f"Error communicating with device {self.device.ip_address}: {err}")

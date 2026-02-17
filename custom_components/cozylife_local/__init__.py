@@ -14,10 +14,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up CozyLife (New) from a config entry."""
     
     # Check for debug logging option
+    pkg_logger = logging.getLogger(__package__)
     if entry.options.get("enable_debug", False):
-        # Set level for the entire integration package
-        logging.getLogger(__package__).setLevel(logging.DEBUG)
+        pkg_logger.setLevel(logging.DEBUG)
         _LOGGER.debug(f"Debug logging enabled via options for {entry.title}")
+    else:
+        pkg_logger.setLevel(logging.NOTSET)
     
     hass.data.setdefault(DOMAIN, {})
 
@@ -32,7 +34,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return False
 
     # Create a coordinator for this device
-    coordinator = CozyLifeCoordinator(hass, device)
+    coordinator = CozyLifeCoordinator(hass, device, entry)
     
     # Fetch initial data so we have something to work with
     await coordinator.async_config_entry_first_refresh()
@@ -49,8 +51,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload config entry."""
-    await async_unload_entry(hass, entry)
-    await async_setup_entry(hass, entry)
+    await hass.config_entries.async_reload(entry.entry_id)
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
