@@ -1,26 +1,8 @@
 import asyncio
 import json
 import logging
-import socket
 import time
 from typing import Any, Dict, List, Optional
-
-import aiohttp
-
-_LOGGER = logging.getLogger(__name__)
-
-COZYLIFE_PORT = 5555
-CMD_INFO = 0
-CMD_QUERY = 2
-CMD_SET = 3
-
-import asyncio
-import json
-import logging
-import time
-from typing import Any, Dict, List, Optional
-
-import aiohttp
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,12 +55,10 @@ class CozyLifeDevice:
 
     async def _connect(self):
         """Establishes an asynchronous TCP connection to the device."""
-        if self._reader and self._writer:
-            return
-
         try:
-            self._reader, self._writer = await asyncio.open_connection(
-                self._ip_address, COZYLIFE_PORT
+            self._reader, self._writer = await asyncio.wait_for(
+                asyncio.open_connection(self._ip_address, COZYLIFE_PORT),
+                timeout=self._timeout,
             )
             _LOGGER.debug(f"Connected to CozyLife device at {self._ip_address}:{COZYLIFE_PORT}")
         except (asyncio.TimeoutError, ConnectionRefusedError, OSError) as e:
@@ -211,14 +191,6 @@ class CozyLifeDevice:
         if msg and 'data' in msg:
             return msg['data']
         return None
-
-    async def async_set_state(self, attributes: Dict[str, Any]) -> bool:
-        """Sets attributes on the device."""
-        msg = await self._send_receive(CMD_SET, attributes)
-        if msg and 'data' in msg:
-            return True
-        return False
-
 
     async def async_set_state(self, attributes: Dict[str, Any]) -> bool:
         """Sets attributes on the device."""
