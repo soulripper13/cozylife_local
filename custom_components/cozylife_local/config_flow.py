@@ -16,6 +16,8 @@ _LOGGER = logging.getLogger(__name__)
 
 DATA_SCHEMA = vol.Schema({
     vol.Required("ip_address", description={"suggested_value": "192.168.1.100"}): str,
+    vol.Optional("min_kelvin", default=2000): vol.All(int, vol.Range(min=1000, max=10000)),
+    vol.Optional("max_kelvin", default=6500): vol.All(int, vol.Range(min=1000, max=10000)),
     vol.Optional("skip_validation", default=False): bool,
 })
 
@@ -35,16 +37,22 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             if skip_validation:
                 _LOGGER.info(f"Skipping validation for {ip_address} as requested for development.")
-                # For development, use IP as unique ID. This is not robust for production
-                # as IPs can change, but it's a workaround for remote setup.
                 await self.async_set_unique_id(ip_address)
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
                     title=f"CozyLife Dev @ {ip_address}",
-                    data={"ip_address": ip_address} # No device_id yet
+                    data={
+                        "ip_address": ip_address,
+                        "min_kelvin": user_input.get("min_kelvin", 2000),
+                        "max_kelvin": user_input.get("max_kelvin", 6500),
+                    }
                 )
             else:
-                return await self._async_create_entry_from_ip(ip_address)
+                return await self._async_create_entry_from_ip(
+                    ip_address,
+                    user_input.get("min_kelvin", 2000),
+                    user_input.get("max_kelvin", 6500),
+                )
         
         return self.async_show_form(
             step_id="user", data_schema=DATA_SCHEMA, errors=errors
@@ -56,7 +64,7 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Get the options flow for this handler."""
         return CozyLifeOptionsFlow(config_entry)
 
-    async def _async_create_entry_from_ip(self, ip_address: str) -> FlowResult:
+    async def _async_create_entry_from_ip(self, ip_address: str, min_kelvin: int, max_kelvin: int) -> FlowResult:
         """Helper to create a config entry from a single IP address."""
         errors: Dict[str, str] = {}
         try:
@@ -69,7 +77,12 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 return self.async_create_entry(
                     title=device.device_model_name or ip_address,
-                    data={"ip_address": ip_address, "device_id": device.device_id}
+                    data={
+                        "ip_address": ip_address,
+                        "device_id": device.device_id,
+                        "min_kelvin": min_kelvin,
+                        "max_kelvin": max_kelvin,
+                    }
                 )
         except asyncio.TimeoutError:
             errors["base"] = "timeout_connect"
@@ -98,6 +111,14 @@ class CozyLifeOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({
+                vol.Optional(
+                    "min_kelvin",
+                    default=self._config_entry.data.get("min_kelvin", 2000)
+                ): vol.All(int, vol.Range(min=1000, max=10000)),
+                vol.Optional(
+                    "max_kelvin",
+                    default=self._config_entry.data.get("max_kelvin", 6500)
+                ): vol.All(int, vol.Range(min=1000, max=10000)),
                 vol.Optional(
                     "enable_debug",
                     default=self._config_entry.options.get("enable_debug", False)
