@@ -51,6 +51,10 @@ async def async_setup_entry(
         _LOGGER.error(f"Missing device DPID or model name for {coordinator.device.ip_address}. Cannot set up light.")
         return
 
+    if coordinator.device.device_type_code not in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]:
+        _LOGGER.debug(f"Device {coordinator.device.ip_address} (Type: {coordinator.device.device_type_code}) is not a light, skipping light platform setup.")
+        return
+
     # Distinguish switches from lights using DPID patterns:
     # Pattern 1: Switches with 2+ gangs have DPID 2 and 4 but NOT 3
     #   - Switch: DPIDs [1, 2, 4] (countdown timers at even positions)
@@ -70,10 +74,6 @@ async def async_setup_entry(
     # Check for switch pattern: has DPID 5 but NOT 6 (switch with timers)
     if has_dpid_5 and not has_dpid_6:
         _LOGGER.debug(f"Device {coordinator.device.ip_address} has DPID 5 but not DPID 6, indicating it's a switch (not a light), skipping light platform setup.")
-        return
-
-    if coordinator.device.device_type_code not in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]:
-        _LOGGER.debug(f"Device {coordinator.device.ip_address} (Type: {coordinator.device.device_type_code}) is not a light, skipping light platform setup.")
         return
 
     async_add_entities([CozyLifeLight(coordinator)], True)
@@ -157,24 +157,24 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
     def hs_color(self) -> Optional[tuple[float, float]]:
         """Return the hs color value."""
         if HUE not in self.coordinator.data or SAT not in self.coordinator.data:
-            _LOGGER.info(f"[COZYLIFE] hs_color: HUE or SAT not in coordinator.data. Data keys: {self.coordinator.data.keys()}")
+            _LOGGER.debug(f"[COZYLIFE] hs_color: HUE or SAT not in coordinator.data. Data keys: {self.coordinator.data.keys()}")
             return None
 
         # Check if color value is valid (< 60000). Device sends 65535 when in white mode.
         # This matches the original integration's validation logic.
         color_value = self.coordinator.data[HUE]
         if color_value >= 60000:
-            _LOGGER.info(f"[COZYLIFE] hs_color: Color value {color_value} >= 60000, ignoring (device in white mode)")
+            _LOGGER.debug(f"[COZYLIFE] hs_color: Color value {color_value} >= 60000, ignoring (device in white mode)")
             return None
 
         # Device sends Hue 0-360, Saturation 0-1000
         # Do RGB round-trip conversion for consistency (matches original integration)
         hue = round(self.coordinator.data[HUE])
         saturation = round(self.coordinator.data[SAT] / 10)
-        _LOGGER.info(f"[COZYLIFE] hs_color: Device values - hue={hue}, sat={saturation}, raw_sat={self.coordinator.data[SAT]}")
+        _LOGGER.debug(f"[COZYLIFE] hs_color: Device values - hue={hue}, sat={saturation}, raw_sat={self.coordinator.data[SAT]}")
         r, g, b = color_hs_to_RGB(hue, saturation)
         hs_color = color_RGB_to_hs(r, g, b)
-        _LOGGER.info(f"[COZYLIFE] hs_color: After RGB conversion - hs_color={hs_color}")
+        _LOGGER.debug(f"[COZYLIFE] hs_color: After RGB conversion - hs_color={hs_color}")
         return hs_color
 
     @property
@@ -187,7 +187,7 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
         # This matches the original integration's validation logic.
         temp_value = self.coordinator.data[TEMP]
         if temp_value >= 60000:
-            _LOGGER.info(f"[COZYLIFE] color_temp_kelvin: Temp value {temp_value} >= 60000, ignoring (device in color mode)")
+            _LOGGER.debug(f"[COZYLIFE] color_temp_kelvin: Temp value {temp_value} >= 60000, ignoring (device in color mode)")
             return None
 
         # Convert device's 0-1000 scale to Kelvin 2000-6500 scale
@@ -229,17 +229,19 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
             normalized_val = (ha_kelvin - MIN_KELVIN) / (MAX_KELVIN - MIN_KELVIN)
             payload[TEMP] = round(normalized_val * 1000)
 
-        await self.coordinator.device.async_set_state(payload)
-        await self.coordinator.async_request_refresh()
+        if await self.coordinator.device.async_set_state(payload):
+            self.coordinator.data.update(payload)
+            self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
         payload = {SWITCH: 0}
-        await self.coordinator.device.async_set_state(payload)
-        await self.coordinator.async_request_refresh()
+        if await self.coordinator.device.async_set_state(payload):
+            self.coordinator.data.update(payload)
+            self.async_write_ha_state()
 
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
-        _LOGGER.info(f"[COZYLIFE] Light entity {self.name} received coordinator update. Data: {self.coordinator.data}")
+        _LOGGER.debug(f"[COZYLIFE] Light entity {self.name} received coordinator update. Data: {self.coordinator.data}")
         self.async_write_ha_state()
