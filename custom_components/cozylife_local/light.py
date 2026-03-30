@@ -25,19 +25,17 @@ from .const import (
     LIGHT_TYPE_CODE,
     RGB_LIGHT_TYPE_CODE,
     BRIGHT,
-    TEMP, # Corrected import
+    TEMP,
     HUE,
     SAT,
     SWITCH,
     WORK_MODE,
+    DEFAULT_MIN_KELVIN,
+    DEFAULT_MAX_KELVIN,
 )
 from .coordinator import CozyLifeCoordinator
 
 _LOGGER = logging.getLogger(__name__)
-
-# Assumed Kelvin range for CozyLife lights. This can be adjusted.
-MIN_KELVIN = 2000
-MAX_KELVIN = 6500
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -76,16 +74,18 @@ async def async_setup_entry(
         _LOGGER.debug(f"Device {coordinator.device.ip_address} has DPID 5 but not DPID 6, indicating it's a switch (not a light), skipping light platform setup.")
         return
 
-    async_add_entities([CozyLifeLight(coordinator)], True)
+    async_add_entities([CozyLifeLight(coordinator, config_entry)], True)
 
 class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
     """Representation of a CozyLife Light."""
 
-    def __init__(self, coordinator: CozyLifeCoordinator):
+    def __init__(self, coordinator: CozyLifeCoordinator, entry: ConfigEntry):
         """Initialize the CozyLife Light."""
         super().__init__(coordinator)
         self._attr_name = coordinator.device.device_model_name
         self._attr_unique_id = f"{coordinator.device.device_id}_light"
+        self._min_kelvin = entry.data.get("min_kelvin", DEFAULT_MIN_KELVIN)
+        self._max_kelvin = entry.data.get("max_kelvin", DEFAULT_MAX_KELVIN)
         
         self._supported_color_modes: set[ColorMode] = set()
         if not coordinator.device.dpid:
@@ -190,18 +190,18 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
             _LOGGER.debug(f"[COZYLIFE] color_temp_kelvin: Temp value {temp_value} >= 60000, ignoring (device in color mode)")
             return None
 
-        # Convert device's 0-1000 scale to Kelvin 2000-6500 scale
-        return int(((temp_value / 1000) * (MAX_KELVIN - MIN_KELVIN)) + MIN_KELVIN)
+        # Convert device's 0-1000 scale to Kelvin
+        return int(((temp_value / 1000) * (self._max_kelvin - self._min_kelvin)) + self._min_kelvin)
 
     @property
     def min_color_temp_kelvin(self) -> int:
         """Return the warmest color temperature in Kelvin."""
-        return MIN_KELVIN
+        return self._min_kelvin
 
     @property
     def max_color_temp_kelvin(self) -> int:
         """Return the coldest color temperature in Kelvin."""
-        return MAX_KELVIN
+        return self._max_kelvin
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
@@ -224,10 +224,8 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
 
         if ATTR_COLOR_TEMP_KELVIN in kwargs and TEMP in self.coordinator.device.dpid:
             ha_kelvin = kwargs[ATTR_COLOR_TEMP_KELVIN]
-            # Work mode already set to 0 above
-            # Convert HA's Kelvin to device's 0-1000 scale
-            normalized_val = (ha_kelvin - MIN_KELVIN) / (MAX_KELVIN - MIN_KELVIN)
-            payload[TEMP] = round(normalized_val * 1000)
+            normalized_val = (ha_kelvin - self._min_kelvin) / (self._max_kelvin - self._min_kelvin)
+            payload[TEMP] = round(max(0, min(1000, normalized_val * 1000)))
 
         if await self.coordinator.device.async_set_state(payload):
             self.coordinator.data.update(payload)
