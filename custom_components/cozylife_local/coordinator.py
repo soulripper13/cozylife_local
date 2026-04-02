@@ -8,21 +8,33 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .cozylife_api import CozyLifeDevice
+from .const import SENSOR_TEMPERATURE, SENSOR_BATTERY, SWITCH
 
 _LOGGER = logging.getLogger(__name__)
 
-UPDATE_INTERVAL = timedelta(seconds=30)  # How often to poll the device
+UPDATE_INTERVAL = timedelta(seconds=30)
+SENSOR_UPDATE_INTERVAL = timedelta(seconds=30)  # Poll frequently; sensor opens port 5555 briefly on wakeup every 30 min
+
 
 class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
     """Manages fetching data from a single CozyLife device."""
 
     def __init__(self, hass: HomeAssistant, device: CozyLifeDevice, entry: ConfigEntry):
         """Initialize coordinator."""
+        # Detect sensor by DPID pattern: has temp(8) + battery(9) but no switch(1)
+        dpid = device.dpid or []
+        self._is_sensor = (
+            SENSOR_TEMPERATURE in dpid
+            and SENSOR_BATTERY in dpid
+            and SWITCH not in dpid
+        )
+        interval = SENSOR_UPDATE_INTERVAL if self._is_sensor else UPDATE_INTERVAL
+
         super().__init__(
             hass,
             _LOGGER,
             name=f"CozyLife device {device.ip_address}",
-            update_interval=UPDATE_INTERVAL,
+            update_interval=interval,
             config_entry=entry,
         )
         self.device = device
@@ -30,13 +42,10 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
     async def _async_update_data(self) -> Dict[str, Any]:
         """Fetch data from device."""
         try:
-            # Update device info if not already done or if a refresh is needed.
-            # This is now a fully local call.
             if not self.device.device_id or not self.device.dpid:
                 if not await self.device.async_update_device_info():
                     raise UpdateFailed(f"Failed to get full device info for {self.device.ip_address}")
 
-            # Query the current state of the device
             _LOGGER.debug(f"[COZYLIFE] Polling device {self.device.ip_address} for state update...")
             state_data = await self.device.async_get_state()
             if state_data is None:
@@ -44,6 +53,19 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
             _LOGGER.debug(f"[COZYLIFE] Successfully fetched state for {self.device.ip_address}: {state_data}")
             return state_data
+
+        except UpdateFailed:
+            # For sleeping sensors: if we have previous data, return it to keep entities available.
+            # The device only wakes periodically so connection failures are expected.
+            if self._is_sensor and self.data is not None:
+                _LOGGER.debug(
+                    f"[COZYLIFE] Sensor {self.device.ip_address} unreachable (sleeping), "
+                    f"retaining last known state."
+                )
+                return self.data
+            raise
+
         except Exception as err:
             _LOGGER.error(f"Error communicating with device {self.device.ip_address}: {err}")
             raise UpdateFailed(f"Error communicating with device {self.device.ip_address}: {err}") from err
+

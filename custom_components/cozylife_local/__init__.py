@@ -10,9 +10,10 @@ from .coordinator import CozyLifeCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up CozyLife (New) from a config entry."""
-    
+
     # Check for debug logging option
     pkg_logger = logging.getLogger(__package__)
     if entry.options.get("enable_debug", False):
@@ -20,14 +21,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.debug(f"Debug logging enabled via options for {entry.title}")
     else:
         pkg_logger.setLevel(logging.NOTSET)
-    
+
     hass.data.setdefault(DOMAIN, {})
 
     ip_address = entry.data["ip_address"]
 
     # Create a CozyLifeDevice instance for this entry
     device = CozyLifeDevice(ip_address)
-    
+
     # Get full device info locally
     if not await device.async_update_device_info():
         _LOGGER.error(f"Failed to get full device information for {ip_address}")
@@ -35,13 +36,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Create a coordinator for this device
     coordinator = CozyLifeCoordinator(hass, device, entry)
-    
+
     # Fetch initial data so we have something to work with
     await coordinator.async_config_entry_first_refresh()
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
-    # Set up platforms (light, switch, etc.)
+    # Set up platforms (light, switch, sensor, etc.)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # Reload entry when options change
@@ -49,17 +50,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     return True
 
+
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload config entry."""
     await hass.config_entries.async_reload(entry.entry_id)
 
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    # Unload platforms
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     if unload_ok:
-        # Remove coordinator from hass.data
         hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok
