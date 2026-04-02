@@ -9,12 +9,17 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 
-from .const import DOMAIN
+from .const import DOMAIN, LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE
 from .cozylife_api import CozyLifeDevice
 
 _LOGGER = logging.getLogger(__name__)
 
 DATA_SCHEMA = vol.Schema({
+    vol.Required("ip_address", description={"suggested_value": "192.168.1.100"}): str,
+    vol.Optional("skip_validation", default=False): bool,
+})
+
+DATA_SCHEMA_LIGHT = vol.Schema({
     vol.Required("ip_address", description={"suggested_value": "192.168.1.100"}): str,
     vol.Optional("min_kelvin", default=2000): vol.All(int, vol.Range(min=1000, max=10000)),
     vol.Optional("max_kelvin", default=6500): vol.All(int, vol.Range(min=1000, max=10000)),
@@ -52,8 +57,9 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ip_address,
                     user_input.get("min_kelvin", 2000),
                     user_input.get("max_kelvin", 6500),
+                    user_input,
                 )
-        
+
         return self.async_show_form(
             step_id="user", data_schema=DATA_SCHEMA, errors=errors
         )
@@ -64,7 +70,7 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Get the options flow for this handler."""
         return CozyLifeOptionsFlow(config_entry)
 
-    async def _async_create_entry_from_ip(self, ip_address: str, min_kelvin: int, max_kelvin: int) -> FlowResult:
+    async def _async_create_entry_from_ip(self, ip_address: str, min_kelvin: int, max_kelvin: int, user_input: Dict[str, Any]) -> FlowResult:
         """Helper to create a config entry from a single IP address."""
         errors: Dict[str, str] = {}
         try:
@@ -75,13 +81,28 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(device.device_id)
                 self._abort_if_unique_id_configured()
 
+                is_light = device.device_type_code in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]
+
+                # If this is a light and kelvin fields weren't provided yet, re-show with light schema
+                if is_light and "min_kelvin" not in user_input:
+                    self._ip_address = ip_address
+                    self._device_id = device.device_id
+                    self._device_model_name = device.device_model_name
+                    return self.async_show_form(
+                        step_id="user",
+                        data_schema=DATA_SCHEMA_LIGHT,
+                        errors={},
+                        description_placeholders={"ip_address": ip_address},
+                    )
+
                 return self.async_create_entry(
                     title=device.device_model_name or ip_address,
                     data={
                         "ip_address": ip_address,
                         "device_id": device.device_id,
-                        "min_kelvin": min_kelvin,
-                        "max_kelvin": max_kelvin,
+                        "device_type_code": device.device_type_code,
+                        "min_kelvin": min_kelvin if is_light else 2000,
+                        "max_kelvin": max_kelvin if is_light else 6500,
                     }
                 )
         except asyncio.TimeoutError:
@@ -91,9 +112,9 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except Exception as e:
             _LOGGER.exception("Unexpected error during CozyLife device setup")
             errors["base"] = "unknown"
-        
+
         return self.async_show_form(
-            step_id="user", data_schema=DATA_SCHEMA, errors=errors # Re-show user form on error
+            step_id="user", data_schema=DATA_SCHEMA, errors=errors
         )
 
 class CozyLifeOptionsFlow(config_entries.OptionsFlow):
@@ -108,20 +129,15 @@ class CozyLifeOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
+        is_light = self._config_entry.data.get("device_type_code") in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]
+
+        schema_fields: Dict[Any, Any] = {}
+        if is_light:
+            schema_fields[vol.Optional("min_kelvin", default=self._config_entry.data.get("min_kelvin", 2000))] = vol.All(int, vol.Range(min=1000, max=10000))
+            schema_fields[vol.Optional("max_kelvin", default=self._config_entry.data.get("max_kelvin", 6500))] = vol.All(int, vol.Range(min=1000, max=10000))
+        schema_fields[vol.Optional("enable_debug", default=self._config_entry.options.get("enable_debug", False))] = bool
+
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema({
-                vol.Optional(
-                    "min_kelvin",
-                    default=self._config_entry.data.get("min_kelvin", 2000)
-                ): vol.All(int, vol.Range(min=1000, max=10000)),
-                vol.Optional(
-                    "max_kelvin",
-                    default=self._config_entry.data.get("max_kelvin", 6500)
-                ): vol.All(int, vol.Range(min=1000, max=10000)),
-                vol.Optional(
-                    "enable_debug",
-                    default=self._config_entry.options.get("enable_debug", False)
-                ): bool,
-            })
+            data_schema=vol.Schema(schema_fields),
         )
