@@ -51,6 +51,15 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             if state_data is None:
                 raise UpdateFailed(f"Failed to query state from device {self.device.ip_address}")
 
+            # Sensors report stale (previous cycle) values on first query after wakeup.
+            # Wait briefly then query again to get the freshly measured values.
+            if self._is_sensor:
+                await asyncio.sleep(2)
+                fresh_data = await self.device.async_get_state()
+                if fresh_data is not None:
+                    state_data = fresh_data
+                    _LOGGER.debug(f"[COZYLIFE] Second query got fresh sensor data for {self.device.ip_address}: {state_data}")
+
             _LOGGER.debug(f"[COZYLIFE] Successfully fetched state for {self.device.ip_address}: {state_data}")
             return state_data
 
