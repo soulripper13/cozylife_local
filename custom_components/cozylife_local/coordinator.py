@@ -39,6 +39,10 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         )
         self.device = device
 
+    @property
+    def is_sensor(self) -> bool:
+        return self._is_sensor
+
     async def _async_update_data(self) -> Dict[str, Any]:
         """Fetch data from device."""
         try:
@@ -71,7 +75,7 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                     f"[COZYLIFE] Sensor {self.device.ip_address} unreachable (sleeping), "
                     f"retaining last known state."
                 )
-                return self.data
+                return self.data if self.data else {}
             raise
 
         except Exception as err:
