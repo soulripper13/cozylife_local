@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE
+from .const import DOMAIN, LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE, SENSOR_TEMPERATURE, SENSOR_BATTERY, SWITCH as SWITCH_DPID
 from .coordinator import CozyLifeCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,6 +27,11 @@ async def async_setup_entry(
 
     if not coordinator.device.dpid:
         _LOGGER.error(f"Missing DPID list for {coordinator.device.ip_address}. Cannot set up switch.")
+        return
+
+    # Skip temp/humidity sensors — they have DPID 8 (temperature) and 9 (battery) but no DPID 1 (switch)
+    if SENSOR_TEMPERATURE in coordinator.device.dpid and SENSOR_BATTERY in coordinator.device.dpid and SWITCH_DPID not in coordinator.device.dpid:
+        _LOGGER.debug(f"Device {coordinator.device.ip_address} is a sensor (has DPIDs 8,9 but not 1), skipping switch platform setup.")
         return
 
     # Skip devices that are lights by checking for light-specific DPIDs

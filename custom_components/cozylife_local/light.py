@@ -32,6 +32,8 @@ from .const import (
     WORK_MODE,
     DEFAULT_MIN_KELVIN,
     DEFAULT_MAX_KELVIN,
+    SENSOR_TEMPERATURE,
+    SENSOR_BATTERY,
 )
 from .coordinator import CozyLifeCoordinator
 
@@ -47,6 +49,11 @@ async def async_setup_entry(
 
     if coordinator.device.dpid is None or coordinator.device.device_model_name is None:
         _LOGGER.error(f"Missing device DPID or model name for {coordinator.device.ip_address}. Cannot set up light.")
+        return
+
+    # Skip temp/humidity sensors — they have DPID 8 (temperature) and 9 (battery) but no DPID 1 (switch)
+    if SENSOR_TEMPERATURE in coordinator.device.dpid and SENSOR_BATTERY in coordinator.device.dpid and SWITCH not in coordinator.device.dpid:
+        _LOGGER.debug(f"Device {coordinator.device.ip_address} is a sensor (has DPIDs 8,9 but not 1), skipping light platform setup.")
         return
 
     if coordinator.device.device_type_code not in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]:
