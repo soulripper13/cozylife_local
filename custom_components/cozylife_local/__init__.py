@@ -37,8 +37,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Create a coordinator for this device
     coordinator = CozyLifeCoordinator(hass, device, entry)
 
-    # Fetch initial data so we have something to work with
-    await coordinator.async_config_entry_first_refresh()
+    if coordinator.is_sensor:
+        # Sensors sleep for 30+ min — don't block setup on first refresh.
+        # Seed with empty data so polling starts, entities update on first successful poll.
+        coordinator.async_set_updated_data({})
+    else:
+        await coordinator.async_config_entry_first_refresh()
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
