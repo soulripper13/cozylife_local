@@ -53,6 +53,14 @@ class CozyLifeDevice:
     def device_type_code(self) -> Optional[str]:
         return self._device_type_code
 
+    def restore_from_cache(self, device_id: str, pid: str, device_type_code: str, dpids: List[str]) -> None:
+        """Restore device info from cached config entry data without contacting the device."""
+        self._device_id = device_id
+        self._pid = pid
+        self._device_type_code = device_type_code
+        self._dpid = dpids
+        self._device_model_name = f"CozyLife Device ({pid})"
+
     async def _connect(self):
         """Establishes an asynchronous TCP connection to the device."""
         try:
