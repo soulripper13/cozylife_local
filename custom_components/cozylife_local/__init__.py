@@ -29,10 +29,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Create a CozyLifeDevice instance for this entry
     device = CozyLifeDevice(ip_address)
 
-    # Get full device info locally
-    if not await device.async_update_device_info():
-        _LOGGER.error(f"Failed to get full device information for {ip_address}")
-        return False
+    # Try to restore device info from cached config entry data first.
+    # This allows setup to succeed even when the device is sleeping.
+    cached_did = entry.data.get("device_id")
+    cached_pid = entry.data.get("pid")
+    cached_dtp = entry.data.get("device_type_code")
+    cached_dpids = entry.data.get("dpids")
+
+    if cached_did and cached_pid and cached_dtp and cached_dpids:
+        device.restore_from_cache(cached_did, cached_pid, cached_dtp, cached_dpids)
+        _LOGGER.debug(f"Restored device info for {ip_address} from cache.")
+    else:
+        # No cache — must contact device (first-time setup)
+        if not await device.async_update_device_info():
+            _LOGGER.error(f"Failed to get full device information for {ip_address}")
+            return False
+        # Save discovered info into config entry for future restarts
+        hass.config_entries.async_update_entry(entry, data={
+            **entry.data,
+            "device_id": device.device_id,
+            "pid": device.pid,
+            "device_type_code": device.device_type_code,
+            "dpids": device.dpid,
+        })
 
     # Create a coordinator for this device
     coordinator = CozyLifeCoordinator(hass, device, entry)
