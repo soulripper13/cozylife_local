@@ -9,7 +9,7 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 
-from .const import DOMAIN, LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE
+from .const import DOMAIN, LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE, SENSOR_TEMPERATURE, SENSOR_BATTERY, SWITCH, KNOWN_SENSOR_PIDS
 from .cozylife_api import CozyLifeDevice
 
 _LOGGER = logging.getLogger(__name__)
@@ -81,7 +81,19 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(device.device_id)
                 self._abort_if_unique_id_configured()
 
-                is_light = device.device_type_code in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]
+                dpids = device.dpid or []
+                is_sensor = (
+                    device.pid in KNOWN_SENSOR_PIDS
+                    or (
+                        SENSOR_TEMPERATURE in dpids
+                        and SENSOR_BATTERY in dpids
+                        and SWITCH not in dpids
+                    )
+                )
+                is_light = (
+                    not is_sensor
+                    and device.device_type_code in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]
+                )
 
                 # If this is a light and kelvin fields weren't provided yet, re-show with light schema
                 if is_light and "min_kelvin" not in user_input:
@@ -100,7 +112,9 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     data={
                         "ip_address": ip_address,
                         "device_id": device.device_id,
+                        "pid": device.pid,
                         "device_type_code": device.device_type_code,
+                        "dpids": dpids,
                         "min_kelvin": min_kelvin if is_light else 2000,
                         "max_kelvin": max_kelvin if is_light else 6500,
                     }
@@ -129,7 +143,20 @@ class CozyLifeOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        is_light = self._config_entry.data.get("device_type_code") in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]
+        dpids = self._config_entry.data.get("dpids") or []
+        pid = self._config_entry.data.get("pid", "")
+        is_sensor = (
+            pid in KNOWN_SENSOR_PIDS
+            or (
+                SENSOR_TEMPERATURE in dpids
+                and SENSOR_BATTERY in dpids
+                and SWITCH not in dpids
+            )
+        )
+        is_light = (
+            not is_sensor
+            and self._config_entry.data.get("device_type_code") in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]
+        )
 
         schema_fields: Dict[Any, Any] = {}
         if is_light:

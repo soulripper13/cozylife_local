@@ -17,6 +17,9 @@ SENSOR_TEMPERATURE = '8'   # raw value ÷ 10 = °C
 SENSOR_HUMIDITY = '4'      # raw value = %
 SENSOR_BATTERY = '9'       # raw value ÷ 10 = %
 
+# Known sensor PIDs — used as the primary discriminator to identify sensor devices
+KNOWN_SENSOR_PIDS = {'Z4tRml'}
+
 # Supported device types (derived from old integration, actual support depends on pid_list)
 SWITCH_TYPE_CODE = '00'
 LIGHT_TYPE_CODE = '01'

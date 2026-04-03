@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .cozylife_api import CozyLifeDevice
-from .const import SENSOR_TEMPERATURE, SENSOR_BATTERY, SWITCH
+from .const import SENSOR_TEMPERATURE, SENSOR_BATTERY, SWITCH, KNOWN_SENSOR_PIDS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,12 +21,15 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
     def __init__(self, hass: HomeAssistant, device: CozyLifeDevice, entry: ConfigEntry):
         """Initialize coordinator."""
-        # Detect sensor by DPID pattern: has temp(8) + battery(9) but no switch(1)
+        # Use PID as primary sensor discriminator; DPID pattern as fallback
         dpid = device.dpid or []
         self._is_sensor = (
-            SENSOR_TEMPERATURE in dpid
-            and SENSOR_BATTERY in dpid
-            and SWITCH not in dpid
+            device.pid in KNOWN_SENSOR_PIDS
+            or (
+                SENSOR_TEMPERATURE in dpid
+                and SENSOR_BATTERY in dpid
+                and SWITCH not in dpid
+            )
         )
         interval = SENSOR_UPDATE_INTERVAL if self._is_sensor else UPDATE_INTERVAL
 

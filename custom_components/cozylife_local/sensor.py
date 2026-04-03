@@ -18,6 +18,7 @@ from .const import (
     SENSOR_HUMIDITY,
     SENSOR_BATTERY,
     SWITCH,
+    KNOWN_SENSOR_PIDS,
 )
 from .coordinator import CozyLifeCoordinator
 
@@ -35,8 +36,15 @@ async def async_setup_entry(
     if not coordinator.device.dpid:
         return
 
-    # Only set up sensor entities for devices that have temp/humidity DPIDs and no switch DPID
-    if not (SENSOR_TEMPERATURE in coordinator.device.dpid and SENSOR_BATTERY in coordinator.device.dpid and SWITCH not in coordinator.device.dpid):
+    # Only set up sensor entities for known sensor devices (by PID or DPID pattern)
+    if not (
+        coordinator.device.pid in KNOWN_SENSOR_PIDS
+        or (
+            SENSOR_TEMPERATURE in coordinator.device.dpid
+            and SENSOR_BATTERY in coordinator.device.dpid
+            and SWITCH not in coordinator.device.dpid
+        )
+    ):
         _LOGGER.debug(
             f"Device {coordinator.device.ip_address} is not a temp/humidity sensor, skipping sensor platform setup."
         )
