@@ -13,7 +13,7 @@ from .const import SENSOR_TEMPERATURE, SENSOR_BATTERY, SWITCH, KNOWN_SENSOR_PIDS
 _LOGGER = logging.getLogger(__name__)
 
 UPDATE_INTERVAL = timedelta(seconds=30)
-SENSOR_UPDATE_INTERVAL = timedelta(seconds=30)  # Poll frequently; sensor opens port 5555 briefly on wakeup every 30 min
+SENSOR_UPDATE_INTERVAL = timedelta(seconds=5)  # Sensor port 5555 open window is ~10s; poll frequently to catch it
 
 
 class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
