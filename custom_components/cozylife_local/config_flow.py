@@ -9,7 +9,7 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 
-from .const import DOMAIN, LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE, SENSOR_TEMPERATURE, SENSOR_BATTERY, SWITCH, KNOWN_SENSOR_PIDS
+from .const import DOMAIN, LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE, SENSOR_TEMPERATURE, SENSOR_BATTERY, SWITCH, KNOWN_SENSOR_PIDS, DEFAULT_SENSOR_REPORT_INTERVAL, SENSOR_TEMP_SENSITIVITY_DPID, SENSOR_HUMIDITY_SENSITIVITY_DPID
 from .cozylife_api import CozyLifeDevice
 
 _LOGGER = logging.getLogger(__name__)
@@ -23,6 +23,12 @@ DATA_SCHEMA_LIGHT = vol.Schema({
     vol.Required("ip_address", description={"suggested_value": "192.168.1.100"}): str,
     vol.Optional("min_kelvin", default=2000): vol.All(int, vol.Range(min=1000, max=10000)),
     vol.Optional("max_kelvin", default=6500): vol.All(int, vol.Range(min=1000, max=10000)),
+    vol.Optional("skip_validation", default=False): bool,
+})
+
+DATA_SCHEMA_SENSOR = vol.Schema({
+    vol.Required("ip_address", description={"suggested_value": "192.168.1.100"}): str,
+    vol.Optional("report_interval", default=DEFAULT_SENSOR_REPORT_INTERVAL): vol.All(int, vol.Range(min=60, max=3600)),
     vol.Optional("skip_validation", default=False): bool,
 })
 
@@ -50,6 +56,7 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         "ip_address": ip_address,
                         "min_kelvin": user_input.get("min_kelvin", 2000),
                         "max_kelvin": user_input.get("max_kelvin", 6500),
+                        "report_interval": user_input.get("report_interval", DEFAULT_SENSOR_REPORT_INTERVAL),
                     }
                 )
             else:
@@ -57,6 +64,7 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ip_address,
                     user_input.get("min_kelvin", 2000),
                     user_input.get("max_kelvin", 6500),
+                    user_input.get("report_interval", DEFAULT_SENSOR_REPORT_INTERVAL),
                     user_input,
                 )
 
@@ -70,7 +78,7 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Get the options flow for this handler."""
         return CozyLifeOptionsFlow(config_entry)
 
-    async def _async_create_entry_from_ip(self, ip_address: str, min_kelvin: int, max_kelvin: int, user_input: Dict[str, Any]) -> FlowResult:
+    async def _async_create_entry_from_ip(self, ip_address: str, min_kelvin: int, max_kelvin: int, report_interval: int, user_input: Dict[str, Any]) -> FlowResult:
         """Helper to create a config entry from a single IP address."""
         errors: Dict[str, str] = {}
         try:
@@ -107,6 +115,18 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         description_placeholders={"ip_address": ip_address},
                     )
 
+                # If this is a sensor and report_interval wasn't provided yet, re-show with sensor schema
+                if is_sensor and "report_interval" not in user_input:
+                    self._ip_address = ip_address
+                    self._device_id = device.device_id
+                    self._device_model_name = device.device_model_name
+                    return self.async_show_form(
+                        step_id="user",
+                        data_schema=DATA_SCHEMA_SENSOR,
+                        errors={},
+                        description_placeholders={"ip_address": ip_address},
+                    )
+
                 return self.async_create_entry(
                     title=device.device_model_name or ip_address,
                     data={
@@ -117,6 +137,7 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         "dpids": dpids,
                         "min_kelvin": min_kelvin if is_light else 2000,
                         "max_kelvin": max_kelvin if is_light else 6500,
+                        "report_interval": report_interval if is_sensor else DEFAULT_SENSOR_REPORT_INTERVAL,
                     }
                 )
         except asyncio.TimeoutError:
@@ -162,6 +183,10 @@ class CozyLifeOptionsFlow(config_entries.OptionsFlow):
         if is_light:
             schema_fields[vol.Optional("min_kelvin", default=self._config_entry.data.get("min_kelvin", 2000))] = vol.All(int, vol.Range(min=1000, max=10000))
             schema_fields[vol.Optional("max_kelvin", default=self._config_entry.data.get("max_kelvin", 6500))] = vol.All(int, vol.Range(min=1000, max=10000))
+        if is_sensor:
+            schema_fields[vol.Optional("report_interval", default=self._config_entry.data.get("report_interval", DEFAULT_SENSOR_REPORT_INTERVAL))] = vol.All(int, vol.Range(min=60, max=3600))
+            schema_fields[vol.Optional("temp_sensitivity", default=self._config_entry.options.get("temp_sensitivity", 5))] = vol.All(int, vol.Range(min=5, max=30))
+            schema_fields[vol.Optional("humidity_sensitivity", default=self._config_entry.options.get("humidity_sensitivity", 5))] = vol.All(int, vol.Range(min=5, max=30))
         schema_fields[vol.Optional("enable_debug", default=self._config_entry.options.get("enable_debug", False))] = bool
 
         return self.async_show_form(

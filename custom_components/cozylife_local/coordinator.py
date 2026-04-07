@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .cozylife_api import CozyLifeDevice
-from .const import SENSOR_TEMPERATURE, SENSOR_BATTERY, SWITCH, KNOWN_SENSOR_PIDS
+from .const import SENSOR_TEMPERATURE, SENSOR_BATTERY, SWITCH, KNOWN_SENSOR_PIDS, SENSOR_REPORT_INTERVAL_DPID, DEFAULT_SENSOR_REPORT_INTERVAL, SENSOR_TEMP_SENSITIVITY_DPID, SENSOR_HUMIDITY_SENSITIVITY_DPID
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +41,9 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             config_entry=entry,
         )
         self.device = device
+        self._report_interval = entry.options.get("report_interval", entry.data.get("report_interval", DEFAULT_SENSOR_REPORT_INTERVAL))
+        self._temp_sensitivity = entry.options.get("temp_sensitivity", None)
+        self._humidity_sensitivity = entry.options.get("humidity_sensitivity", None)
 
     @property
     def is_sensor(self) -> bool:
@@ -54,18 +57,26 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                     raise UpdateFailed(f"Failed to get full device info for {self.device.ip_address}")
 
             _LOGGER.debug(f"[COZYLIFE] Polling device {self.device.ip_address} for state update...")
+
             state_data = await self.device.async_get_state()
             if state_data is None:
                 raise UpdateFailed(f"Failed to query state from device {self.device.ip_address}")
 
-            # Sensors report stale (previous cycle) values on first query after wakeup.
-            # Wait briefly then query again to get the freshly measured values.
+            # Check if report interval needs to be pushed (first connection or reverted by device)
+            if self._is_sensor and state_data.get(SENSOR_REPORT_INTERVAL_DPID) != self._report_interval:
+                _LOGGER.debug(f"[COZYLIFE] Report interval is {state_data.get(SENSOR_REPORT_INTERVAL_DPID)}, setting to {self._report_interval}s for {self.device.ip_address}")
+                await self.device.async_set_state({SENSOR_REPORT_INTERVAL_DPID: self._report_interval})
+
+            # Push sensitivity settings if configured and different from device values
             if self._is_sensor:
-                await asyncio.sleep(2)
-                fresh_data = await self.device.async_get_state()
-                if fresh_data is not None:
-                    state_data = fresh_data
-                    _LOGGER.debug(f"[COZYLIFE] Second query got fresh sensor data for {self.device.ip_address}: {state_data}")
+                updates = {}
+                if self._temp_sensitivity is not None and state_data.get(SENSOR_TEMP_SENSITIVITY_DPID) != self._temp_sensitivity:
+                    updates[SENSOR_TEMP_SENSITIVITY_DPID] = self._temp_sensitivity
+                if self._humidity_sensitivity is not None and state_data.get(SENSOR_HUMIDITY_SENSITIVITY_DPID) != self._humidity_sensitivity:
+                    updates[SENSOR_HUMIDITY_SENSITIVITY_DPID] = self._humidity_sensitivity
+                if updates:
+                    _LOGGER.debug(f"[COZYLIFE] Pushing sensitivity settings {updates} to {self.device.ip_address}")
+                    await self.device.async_set_state(updates)
 
             _LOGGER.debug(f"[COZYLIFE] Successfully fetched state for {self.device.ip_address}: {state_data}")
             return state_data

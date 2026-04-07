@@ -70,7 +70,6 @@ class CozyLifeDevice:
             )
             _LOGGER.debug(f"Connected to CozyLife device at {self._ip_address}:{COZYLIFE_PORT}")
         except (asyncio.TimeoutError, ConnectionRefusedError, OSError) as e:
-            _LOGGER.error(f"Failed to connect to CozyLife device at {self._ip_address}: {e}")
             self._disconnect()
             raise
 
@@ -83,7 +82,6 @@ class CozyLifeDevice:
                 pass
         self._reader = None
         self._writer = None
-        _LOGGER.debug(f"Disconnected from CozyLife device at {self._ip_address}")
 
     async def _send_receive(self, cmd: int, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -137,7 +135,6 @@ class CozyLifeDevice:
             return None
 
         except (ConnectionRefusedError, OSError) as e:
-            _LOGGER.error(f"Communication error with {self._ip_address}: {e}")
             self._disconnect()
             return None
         finally:
@@ -197,7 +194,7 @@ class CozyLifeDevice:
         """Queries the current state of the device."""
         msg = await self._send_receive(CMD_QUERY, {})
         if msg and 'data' in msg:
-            return msg['data']
+            return {str(k): v for k, v in msg['data'].items()}
         return None
 
     async def async_set_state(self, attributes: Dict[str, Any]) -> bool:
