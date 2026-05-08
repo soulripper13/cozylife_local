@@ -7,6 +7,7 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN, PLATFORMS
 from .cozylife_api import CozyLifeDevice
 from .coordinator import CozyLifeCoordinator
+from .discovery import async_load_model_catalog
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         pkg_logger.setLevel(logging.NOTSET)
 
     hass.data.setdefault(DOMAIN, {})
+    await async_load_model_catalog(hass)
 
     ip_address = entry.data["ip_address"]
 
