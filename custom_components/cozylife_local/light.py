@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
@@ -13,8 +13,6 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util.color import (
-    color_temperature_kelvin_to_mired as kelvin_to_mired,
-    color_temperature_mired_to_kelvin as mired_to_kelvin,
     color_hs_to_RGB,
     color_RGB_to_hs,
 )
@@ -22,8 +20,6 @@ from homeassistant.util.color import (
 
 from .const import (
     DOMAIN,
-    LIGHT_TYPE_CODE,
-    RGB_LIGHT_TYPE_CODE,
     BRIGHT,
     TEMP,
     HUE,
@@ -32,10 +28,6 @@ from .const import (
     WORK_MODE,
     DEFAULT_MIN_KELVIN,
     DEFAULT_MAX_KELVIN,
-    SENSOR_TEMPERATURE,
-    SENSOR_BATTERY,
-    SWITCH,
-    KNOWN_SENSOR_PIDS,
 )
 from .coordinator import CozyLifeCoordinator
 
@@ -53,38 +45,13 @@ async def async_setup_entry(
         _LOGGER.error(f"Missing device DPID or model name for {coordinator.device.ip_address}. Cannot set up light.")
         return
 
-    # Skip temp/humidity sensors — identified by PID or DPID pattern
-    if (coordinator.device.pid in KNOWN_SENSOR_PIDS or (
-        SENSOR_TEMPERATURE in coordinator.device.dpid
-        and SENSOR_BATTERY in coordinator.device.dpid
-        and SWITCH not in coordinator.device.dpid
-    )):
-        _LOGGER.debug(f"Device {coordinator.device.ip_address} is a sensor (has DPIDs 8,9 but not 1), skipping light platform setup.")
-        return
-
-    if coordinator.device.device_type_code not in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]:
-        _LOGGER.debug(f"Device {coordinator.device.ip_address} (Type: {coordinator.device.device_type_code}) is not a light, skipping light platform setup.")
-        return
-
-    # Distinguish switches from lights using DPID patterns:
-    # Pattern 1: Switches with 2+ gangs have DPID 2 and 4 but NOT 3
-    #   - Switch: DPIDs [1, 2, 4] (countdown timers at even positions)
-    #   - Light: DPIDs [1, 2, 3, 4] (sequential: switch, work_mode, temp, bright)
-    # Pattern 2: RGB lights have both DPID 5 (hue) AND 6 (saturation) together
-    has_dpid_2 = WORK_MODE in coordinator.device.dpid  # WORK_MODE='2'
-    has_dpid_3 = TEMP in coordinator.device.dpid       # TEMP='3'
-    has_dpid_4 = BRIGHT in coordinator.device.dpid     # BRIGHT='4'
-    has_dpid_5 = HUE in coordinator.device.dpid        # HUE='5'
-    has_dpid_6 = SAT in coordinator.device.dpid        # SAT='6'
-
-    # Check for switch pattern: has DPID 2 and 4 but NOT 3 (multi-gang switch)
-    if has_dpid_2 and has_dpid_4 and not has_dpid_3:
-        _LOGGER.debug(f"Device {coordinator.device.ip_address} has DPIDs 2,4 but not 3, indicating it's a multi-gang switch, skipping light platform setup.")
-        return
-
-    # Check for switch pattern: has DPID 5 but NOT 6 (switch with timers)
-    if has_dpid_5 and not has_dpid_6:
-        _LOGGER.debug(f"Device {coordinator.device.ip_address} has DPID 5 but not DPID 6, indicating it's a switch (not a light), skipping light platform setup.")
+    if not coordinator.classification.is_light:
+        _LOGGER.debug(
+            "Device %s (Type: %s, Source: %s) is not a light, skipping light platform setup.",
+            coordinator.device.ip_address,
+            coordinator.classification.effective_type_code,
+            coordinator.classification.source,
+        )
         return
 
     async_add_entities([CozyLifeLight(coordinator, config_entry)], True)
@@ -97,8 +64,14 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
         super().__init__(coordinator)
         self._attr_name = coordinator.device.device_model_name
         self._attr_unique_id = f"{coordinator.device.device_id}_light"
-        self._min_kelvin = entry.data.get("min_kelvin", DEFAULT_MIN_KELVIN)
-        self._max_kelvin = entry.data.get("max_kelvin", DEFAULT_MAX_KELVIN)
+        self._min_kelvin = entry.options.get(
+            "min_kelvin",
+            entry.data.get("min_kelvin", DEFAULT_MIN_KELVIN),
+        )
+        self._max_kelvin = entry.options.get(
+            "max_kelvin",
+            entry.data.get("max_kelvin", DEFAULT_MAX_KELVIN),
+        )
         
         self._supported_color_modes: set[ColorMode] = set()
         if not coordinator.device.dpid:
@@ -218,8 +191,10 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
-        # Match original integration: start with power=255, work_mode=0
-        payload: Dict[str, Any] = {SWITCH: 255, WORK_MODE: 0}
+        # Match original integration where work mode is supported.
+        payload: Dict[str, Any] = {SWITCH: 255}
+        if WORK_MODE in self.coordinator.device.dpid:
+            payload[WORK_MODE] = 0
 
         if ATTR_BRIGHTNESS in kwargs and BRIGHT in self.coordinator.device.dpid:
             ha_brightness = kwargs[ATTR_BRIGHTNESS]
