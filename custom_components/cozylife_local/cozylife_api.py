@@ -4,7 +4,11 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
+from .discovery import get_model_info
+
 _LOGGER = logging.getLogger(__name__)
+_RAW_LOGGER = logging.getLogger(f"{__name__}.raw")
+_RAW_LOGGER.setLevel(logging.INFO)
 
 COZYLIFE_PORT = 5555
 CMD_INFO = 0
@@ -55,11 +59,14 @@ class CozyLifeDevice:
 
     def restore_from_cache(self, device_id: str, pid: str, device_type_code: str, dpids: List[str]) -> None:
         """Restore device info from cached config entry data without contacting the device."""
+        model_info = get_model_info(pid)
         self._device_id = device_id
         self._pid = pid
         self._device_type_code = device_type_code
         self._dpid = dpids
-        self._device_model_name = f"CozyLife Device ({pid})"
+        self._device_model_name = (
+            model_info.model_name if model_info else f"CozyLife Device ({pid})"
+        )
 
     async def _connect(self):
         """Establishes an asynchronous TCP connection to the device."""
@@ -68,7 +75,7 @@ class CozyLifeDevice:
                 asyncio.open_connection(self._ip_address, COZYLIFE_PORT),
                 timeout=self._timeout,
             )
-            _LOGGER.debug(f"Connected to CozyLife device at {self._ip_address}:{COZYLIFE_PORT}")
+            _RAW_LOGGER.debug(f"Connected to CozyLife device at {self._ip_address}:{COZYLIFE_PORT}")
         except (asyncio.TimeoutError, ConnectionRefusedError, OSError) as e:
             self._disconnect()
             raise
@@ -95,7 +102,7 @@ class CozyLifeDevice:
             sent_sn = message.get('sn')
             encoded_message = (json.dumps(message, separators=(',', ':')) + "\r\n").encode('utf8')
             
-            _LOGGER.debug(f"Sending to {self._ip_address}: {encoded_message!r}")
+            _RAW_LOGGER.debug(f"Sending to {self._ip_address}: {encoded_message!r}")
             self._writer.write(encoded_message)
             await self._writer.drain()
 
@@ -113,7 +120,7 @@ class CozyLifeDevice:
                         self._disconnect()
                         return None
 
-                    _LOGGER.debug(f"Received from {self._ip_address}: {response_data!r}")
+                    _RAW_LOGGER.debug(f"Received from {self._ip_address}: {response_data!r}")
                     resp_json = json.loads(response_data.decode('utf8').strip())
 
                     if resp_json.get('sn') == sent_sn:
@@ -123,7 +130,7 @@ class CozyLifeDevice:
                             _LOGGER.warning(f"Received error response for sn {sent_sn}: {resp_json}")
                             return None
                     else:
-                        _LOGGER.debug(f"Discarding message with mismatched sn: {resp_json}")
+                        _RAW_LOGGER.debug(f"Discarding message with mismatched sn: {resp_json}")
 
                 except asyncio.TimeoutError:
                     _LOGGER.warning(f"Timeout waiting for response with sn {sent_sn} from {self._ip_address}")
@@ -171,8 +178,10 @@ class CozyLifeDevice:
         self._device_id = info_msg['did']
         self._pid = info_msg['pid']
         self._device_type_code = info_msg['dtp']
-        # Use a generic model name as the friendly name is no longer available from the cloud
-        self._device_model_name = f"CozyLife Device ({self._pid})"
+        model_info = get_model_info(self._pid)
+        self._device_model_name = (
+            model_info.model_name if model_info else f"CozyLife Device ({self._pid})"
+        )
 
         # Step 2: Get the full list of supported DPIDs
         query_msg = await self._send_receive(CMD_QUERY, {})
