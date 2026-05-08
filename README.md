@@ -12,11 +12,13 @@ This integration was developed to provide a modern, robust, and easy-to-use alte
 
 **This is a new integration and should be considered in a beta testing phase.**
 
-While it has been tested and confirmed to work with multi-gang switches, we are actively looking for testers to help verify its functionality with other CozyLife devices, such as:
+While it has been tested and confirmed to work with multi-gang switches, lights, sensors, and metered outlets, device models vary by PID and DPID layout. We are actively looking for testers to help verify additional CozyLife devices, especially:
 
 -   Single switches
--   Smart plugs
+-   Smart plugs and outlets, including power-monitoring plugs
 -   Lights (tunable white and RGB)
+-   Temperature/humidity/battery sensors
+-   Door/window, motion, water leak, smoke, and occupancy sensors
 -   Other CozyLife devices
 
 If you have one of these devices, please install the integration and report your experience! Your feedback is crucial for improving device compatibility.
@@ -34,10 +36,15 @@ Please [open an issue](https://github.com/soulripper13/cozylife_local/issues) wi
 
 - **100% Local Control:** No cloud connection is required for device operation after setup. All commands are sent directly to your devices on your local network.
 - **UI-Based Configuration:** No YAML configuration required.
-- **Single IP Setup:** Devices are added one by one using their static IP address.
+- **Auto Discovery:** Can scan the local IPv4 network and show the number of CozyLife devices found during setup.
+- **Single IP Setup:** Devices can still be added one by one using their static IP address.
+- **Sleeping Sensor Setup:** Battery temperature/humidity sensors can be added by static IP even when asleep; the integration creates cached metadata and updates values when the sensor wakes.
 - **Multi-Gang Switch Support:** Correctly handles multi-button devices (e.g., double rocker switches), creating a separate entity for each switch.
-- **Comprehensive Device Logging:** Automatically logs detailed device information (DID, PID, DPIDs, capabilities) to help you understand and troubleshoot your devices.
-- **Automatic DPID Detection:** Smart detection of device capabilities including brightness, color, and color temperature.
+- **Smart Plug & Outlet Support:** Creates outlet entities and exposes energy, current, power, and voltage sensors when the device reports metering DPIDs.
+- **Sensor Support:** Supports temperature, humidity, battery, and selected binary sensor devices.
+- **Device Discovery Logging:** Automatically logs device information (DID, PID, Type Code, and DPIDs) to help you understand and troubleshoot your devices.
+- **Catalog-Based Device Detection:** Uses the bundled CozyLife model catalog plus reported DPIDs to avoid misclassifying motors, sensors, switches, outlets, and lights.
+- **Automatic DPID Detection:** Smart detection of device capabilities including switch gangs, outlet metering, brightness, color, color temperature, and sensor values.
 - **Developer Mode:** Includes a "Skip validation" option for developers or advanced users who need to set up devices remotely.
 
 ## Installation
@@ -73,12 +80,27 @@ Once installed and restarted, you can add your CozyLife devices.
 2.  **Add Integration:** Click the `+ ADD INTEGRATION` button.
 3.  **Search:** Search for "CozyLife Local" and click on it.
 4.  **Setup:**
-    -   Enter the **single, static IP address** of your CozyLife device. The integration will connect and set it up.
+    -   Leave **IP address** empty and submit to scan the local network automatically.
+    -   The integration will show how many CozyLife devices were found, then let you select one to add.
+    -   To scan a specific subnet, set **Network CIDR** to something like `192.168.1.0/24`. The default `auto` scans Home Assistant's local IPv4 network.
+    -   To add a device manually, enter the **single, static IP address** of your CozyLife device. The integration will connect and set it up.
+    -   For battery temperature/humidity sensors that sleep most of the time, enter the device's static IP address and enable **Sleeping temp/humidity sensor**. This creates the temperature, humidity, and battery entities without contacting the device first; values will appear after the sensor next wakes/responds.
+    -   Lights may prompt for minimum and maximum color temperature values.
+    -   Sleeping sensors may prompt for report interval and sensitivity settings. The minimum report interval is 1800 seconds.
     -   **Developer Method:** To add a device remotely without an active connection (e.g., for development), enter its single, static IP address and check the "Skip validation" box.
+
+### Device Options
+
+After a device is added, open the integration entry's options to adjust device-specific behavior:
+
+-   **Lights:** minimum and maximum Kelvin range.
+-   **Sensor devices:** report interval, temperature sensitivity, and humidity sensitivity.
+-   Battery temperature/humidity sensors use a minimum report interval of 1800 seconds because the CozyLife app and device firmware do not persist lower values.
+-   **All devices:** optional debug logging.
 
 ## Device Information & Logging
 
-This integration provides **comprehensive logging** to help you understand your device's capabilities and troubleshoot issues. When you add a device, detailed information is automatically logged to Home Assistant's logs.
+This integration logs the identifiers and DPIDs needed to understand your device's capabilities and troubleshoot issues. When you add a device through normal discovery or manual IP setup, discovery information is automatically logged to Home Assistant's logs. Sleeping sensor setup creates cached metadata without waking the device, so it may not have a real DID in the logs at setup time.
 
 ### Viewing Your Device Information
 
@@ -90,7 +112,7 @@ After adding a device, check your Home Assistant logs to see detailed device inf
    logger:
      default: info
      logs:
-       custom_components.cozylife_local: warning
+       custom_components.cozylife_local: info
    ```
 
 ### What You'll See in the Logs
@@ -98,32 +120,8 @@ After adding a device, check your Home Assistant logs to see detailed device inf
 When you add a device, the logs will show:
 
 ```
-╔══════════════════════════════════════════════════════════════════
-║ Device Discovery Successful!
-║
-║ Device Model: LED Strip
-║ Device ID (DID): 12345678
-║ Product ID (PID): d50v0i
-║ Device Type Code: 01
-║ IP Address: 192.168.1.177
-║
-║ Supported DPIDs: ['1', '3', '5']
-║
-║ Device Category: Light
-║
-║ DPID Capabilities Detected:
-║   - DPID 1: Power Switch
-║   - DPID 3: Color Temperature OR Brightness (device dependent)
-║   - DPID 5: Hue (Color)
-╚══════════════════════════════════════════════════════════════════
-
-💡 Setting up LIGHT entity for LED Strip
-   ├─ Analyzing light capabilities...
-   ├─ DPIDs: ['1', '3', '5']
-   ├─ ✓ Brightness: DPID 3
-   └─ Supported modes: brightness
-
-✅ CozyLife device setup complete: LED Strip
+Successfully discovered device 192.168.1.177 locally: DID=12345678, PID=abc123, Type=00, DPIDs=['1', '26', '27', '28', '29']
+Detected 1 outlet entity/entities at 192.168.1.177 with DPIDs: ['1', '26', '27', '28', '29']
 ```
 
 ### Understanding DPIDs
@@ -132,26 +130,41 @@ DPIDs (Data Point IDs) are the functions your device supports. Common DPIDs incl
 
 | DPID | Function | Description |
 |------|----------|-------------|
-| `1` | Power Switch | Turn device on/off |
-| `2` | Work Mode | Switch between color/white modes (0=white, 1=color) |
-| `3` | Color Temperature | Warm to cool white (2000K-6500K) |
-| `4` | Brightness | Brightness level (0-100%) |
-| `5` | Hue | RGB color hue (0-360°) |
-| `6` | Saturation | RGB color saturation (0-100%) |
-| `7` | Color | Alternative color control |
-| `8` | Scene | Scene/effect mode |
+| `1` | Power / switch bitmask | Light power, outlet power, or switch gang bitmask depending on device |
+| `2` | Work mode / countdown | Light mode on many lights; gang 1 countdown on many switches |
+| `3` | Color temperature | Warm to cool white, mapped to the configured Kelvin range |
+| `4` | Brightness / humidity / countdown | Brightness on lights, humidity on environment sensors, or gang 2 countdown on switches |
+| `5` | Hue | RGB color hue on supported lights |
+| `6` | Saturation / motion / countdown | RGB saturation, motion status, or gang 3 countdown depending on device |
+| `7` | Contact / color | Door/window contact on supported sensors; alternative color control on some lights |
+| `8` | Temperature / scene | Temperature on environment sensors; scene/effect mode on some lights |
+| `9` | Battery | Battery level on supported sensors |
+| `10` | Moisture | Water leak status on supported sensors |
+| `11` | Smoke | Smoke alarm status on supported sensors |
+| `14` | Sensor report interval | Reporting interval for supported sleeping sensors; 1800 seconds is the observed minimum |
+| `24` | Humidity sensitivity | Sensitivity setting for supported environment sensors |
+| `25` | Temperature sensitivity | Sensitivity setting for supported environment sensors |
+| `26` | Energy / sensor-specific value | Total energy for metered plugs, in kWh; may appear as an unused or model-specific value on some sensors |
+| `27` | Current | Current for metered plugs, in mA |
+| `28` | Power | Power for metered plugs, in W |
+| `29` | Voltage | Voltage for metered plugs, in V |
+| `30` | Plug fault | Fault state reported by some metered plugs |
+| `101` | Occupancy | Occupancy/proximity status on supported radar sensors |
 
 ### Understanding Device Type Codes
 
-Your device's Type Code determines how it's set up in Home Assistant:
+Your device's Type Code and PID catalog entry determine how it is set up in Home Assistant:
 
 | Type Code | Category | Description |
 |-----------|----------|-------------|
-| `00` | Switch | Wall switches, smart plugs |
-| `01` | Light | Basic lights, tunable white lights |
-| `02` | RGB Light | RGB LED strips and color-changing lights |
+| `00` | Electrical | Wall switches, multi-gang switches, smart plugs, and outlets |
+| `01` | Light | Basic lights, tunable white lights, RGB bulbs, LED strips, and ceiling lights |
+| `02` | Motor | Recognized from the catalog to prevent false light/switch setup; motor entities are not currently exposed |
+| `03` | Sensor | Temperature/humidity sensors and selected binary sensors |
+| `05` | Home Appliances | Generic power devices may expose one switch entity when supported |
+| `19` | Outdoor Travel | Generic power devices may expose one switch entity when supported |
 
-**Note:** Devices with Type Code `02` will be set up as lights with full RGB and brightness control, not as switches.
+**Note:** Some older or unknown RGB lights report Type Code `02`. The integration still supports this as a fallback when the bundled catalog does not identify the PID as a motor.
 
 ### Troubleshooting with Logs
 
@@ -159,11 +172,12 @@ If your device isn't working as expected:
 
 1. **Check the device discovery log** to see which DPIDs were detected
 2. **Look for warning messages** like:
-   - `⚠️  ON/OFF only - no dimming/color capabilities detected` - Device appears as simple switch
-   - `⚠️  No switch entities created` - Expected switch DPIDs not found
+   - `Failed to query DPID list from device` - The integration could reach the device, but could not get its capability list
+   - `does not support switch entities` - The device was classified as something other than a supported switch/outlet
+   - `has no supported sensor DPIDs` - The integration identified the device, but there is no implemented entity mapping for its reported DPIDs
 
 3. **Share your logs** when reporting issues on GitHub:
-   - Copy the device discovery box from your logs
+   - Copy the device discovery lines from your logs
    - Include the DPID list and detected capabilities
    - This helps developers add support for your specific device model
 
@@ -171,18 +185,27 @@ If your device isn't working as expected:
 
 If your LED strip shows up as on/off only:
 
-1. Check logs for: `DPID Capabilities Detected`
-2. Look for DPIDs `3`, `4`, or `5` in the list
+1. Check logs for: `Successfully discovered device`
+2. Look for DPIDs `3`, `4`, `5`, or `6` in the list
 3. If present but not detected as brightness, [open an issue](https://github.com/soulripper13/cozylife_local/issues) with your device's PID and DPID list
 
 ## Supported Devices
 
-This integration has been tested with and is known to work with:
+This integration exposes Home Assistant entities for:
+
 -   Multi-gang switches (e.g., double rocker switches)
 -   Single switches
--   Lights (including tunable white and RGB)
+-   Smart plugs and outlets
+-   Metered smart plugs with energy, current, power, and voltage sensors
+-   Lights, including on/off, dimmable, tunable white, RGB, LED strip, and ceiling light models
+-   Temperature/humidity/battery sensors, including known PID `Z4tRml`
+-   Door/window contact and magnetic sensors when the device reports the expected contact DPID
+-   Motion sensors when the device reports the expected motion DPID
+-   Water leak sensors when the device reports the expected moisture DPID
+-   Smoke sensors when the device reports the expected smoke DPID
+-   Proximity/radar occupancy sensors when the device reports the expected occupancy DPID
 
-It is expected to work with a wide range of CozyLife devices that use the local TCP protocol.
+The bundled CozyLife model catalog includes additional categories such as motors, cameras/locks, gateways, AI conversation devices, and smart speakers. Those categories may be detected for classification, but this integration does not currently expose full Home Assistant entities for them unless listed above.
 
 ---
 
@@ -190,26 +213,26 @@ It is expected to work with a wide range of CozyLife devices that use the local 
 
 ### My LED strip only shows on/off, no brightness control
 
-**Solution:** This was a known issue with RGB lights (Type Code `02`) not being recognized. Update to the latest version of the integration which includes:
-- Support for Device Type Code `02` (RGB lights)
-- Correct DPID mapping (DPID 4 = brightness, DPID 3 = color temperature)
+**Solution:** Update to the latest version of the integration, then check the device discovery logs for the PID, Type Code, and DPIDs. Supported lights are now identified using the bundled model catalog first, with a fallback for older unknown RGB lights that report Type Code `02`.
+
+For typical RGB and tunable-white lights, the important DPIDs are:
+- `1` for power
+- `3` for color temperature
+- `4` for brightness
+- `5` for hue
+- `6` for saturation
 
 Check your logs for:
 ```
-Device Type Code: 02
-Device Category: RGB Light
-✓ Brightness: DPID 4
-✓ RGB Color: DPIDs 5 (Hue) + 6 (Saturation)
-Supported modes: color_temp, hs
+Device Type Code: 01
+Supported DPIDs: ['1', '2', '3', '4', '5', '6']
 ```
 
-If you still see your RGB light set up as a switch instead of a light, check the Device Type Code. If it's `02`, you need to update to the latest version of the integration.
-
-If you see `ON/OFF only`, please [open an issue](https://github.com/soulripper13/cozylife_local/issues) with your device's log output.
+If your light has brightness/color DPIDs but is still exposed as on/off only, please [open an issue](https://github.com/soulripper13/cozylife_local/issues) with your device's log output.
 
 ### LED strip blinks dark blue when changing colors
 
-**Solution:** This was a known issue with incorrect work mode and DPID handling. Update to version 0.2.2 or later which includes:
+**Solution:** This was a known issue with incorrect work mode and DPID handling. Update to the latest version of the integration, which includes:
 - Fixed work mode handling for RGB color changes (keeps work mode at 0)
 - Corrected DPID mappings to match CozyLife protocol standard
 - Added RGB color correction for accurate color reproduction
@@ -230,17 +253,38 @@ Check your router's DHCP client list or use a network scanner app. Once found, s
 
 ### Where can I find my device's DID and PID?
 
-After adding a device, check `Settings` → `System` → `Logs`. Look for the device discovery box which contains all device information including DID, PID, and DPIDs.
+After adding a device through normal discovery or manual IP setup, check `Settings` → `System` → `Logs`. Look for the `Successfully discovered device` line, which contains DID, PID, Type Code, and DPIDs. Sleeping sensor setup may not show a real DID because it intentionally avoids contacting the device while it is asleep.
 
 ### My switch shows fewer gangs than it actually has
 
-The integration currently defaults to 2-gang switches. If you have 1-gang or 3+ gang switches, please [open an issue](https://github.com/soulripper13/cozylife_local/issues) with your device information from the logs so we can add support.
+The integration detects switch count from countdown DPIDs (`2`, `4`, `6`, `8`, `10`, `12`, `14`, `16`) and can also infer counts from known model names. If the detected count is wrong, please [open an issue](https://github.com/soulripper13/cozylife_local/issues) with your PID, model name, and DPID list.
+
+### My smart plug does not show energy/power sensors
+
+Metering sensors are created only when the device is classified as an electrical switch/outlet and reports the metering DPIDs:
+
+| Sensor | DPID |
+|--------|------|
+| Energy | `26` |
+| Current | `27` |
+| Power | `28` |
+| Voltage | `29` |
+
+If your plug has different metering DPIDs, open an issue with the discovery log so a mapping can be added.
+
+### My battery sensor is unavailable after restart
+
+Some CozyLife sensors sleep for long periods. The integration restores cached device metadata at startup, polls frequently until the first successful response, then schedules future polling windows around the configured report interval. For known battery temperature/humidity sensors, the CozyLife app and device firmware use a minimum report interval of 1800 seconds. Values may remain empty until the device wakes and reports successfully.
+
+### My door/motion/water/smoke/radar sensor was detected but no entity appeared
+
+Binary sensor support is intentionally conservative. The integration currently requires a recognizable model name plus an expected DPID mapping, so unsupported PIDs may be classified but not yet exposed as entities. Share the PID, model name, and DPID list in an issue to add support safely.
 
 ### Can I control RGB color on my lights?
 
-If your device has DPIDs `5` (Hue) and `6` (Saturation), RGB color control should be automatically enabled. Check the logs for:
+If your device is classified as a light and has DPIDs `5` (Hue) and `6` (Saturation), RGB color control should be automatically enabled. Check the discovery log for both DPIDs:
 ```
-✓ RGB Color: DPIDs 5 (Hue) + 6 (Saturation)
+DPIDs=['1', '2', '3', '4', '5', '6']
 ```
 
 ---
