@@ -9,28 +9,77 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 
-from .const import DOMAIN, LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE, SENSOR_TEMPERATURE, SENSOR_BATTERY, SWITCH, KNOWN_SENSOR_PIDS, DEFAULT_SENSOR_REPORT_INTERVAL, SENSOR_TEMP_SENSITIVITY_DPID, SENSOR_HUMIDITY_SENSITIVITY_DPID
+from .const import (
+    DOMAIN,
+    DEFAULT_SENSOR_REPORT_INTERVAL,
+    MIN_SENSOR_REPORT_INTERVAL,
+    SENSOR_BATTERY,
+    SENSOR_HUMIDITY,
+    SENSOR_HUMIDITY_SENSITIVITY_DPID,
+    SENSOR_REPORT_INTERVAL_DPID,
+    SENSOR_TEMPERATURE,
+    SENSOR_TEMP_SENSITIVITY_DPID,
+    SENSOR_TYPE_CODE,
+)
 from .cozylife_api import CozyLifeDevice
+from .discovery import async_load_model_catalog, classify_device
+from .network_discovery import (
+    AUTO_NETWORK,
+    DiscoveredDevice,
+    NetworkScanTooLarge,
+    NoNetworkAvailable,
+    async_discover_devices,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 DATA_SCHEMA = vol.Schema({
-    vol.Required("ip_address", description={"suggested_value": "192.168.1.100"}): str,
+    vol.Optional("ip_address", default="", description={"suggested_value": "192.168.1.100"}): str,
+    vol.Optional("network_cidr", default=AUTO_NETWORK): str,
+    vol.Optional("sleeping_sensor", default=False): bool,
     vol.Optional("skip_validation", default=False): bool,
 })
 
-DATA_SCHEMA_LIGHT = vol.Schema({
-    vol.Required("ip_address", description={"suggested_value": "192.168.1.100"}): str,
-    vol.Optional("min_kelvin", default=2000): vol.All(int, vol.Range(min=1000, max=10000)),
-    vol.Optional("max_kelvin", default=6500): vol.All(int, vol.Range(min=1000, max=10000)),
-    vol.Optional("skip_validation", default=False): bool,
-})
+SLEEPING_SENSOR_PID = "Z4tRml"
+SLEEPING_SENSOR_DPIDS = [
+    SENSOR_HUMIDITY,
+    SENSOR_TEMPERATURE,
+    SENSOR_BATTERY,
+    SENSOR_REPORT_INTERVAL_DPID,
+    SENSOR_HUMIDITY_SENSITIVITY_DPID,
+    SENSOR_TEMP_SENSITIVITY_DPID,
+]
 
-DATA_SCHEMA_SENSOR = vol.Schema({
-    vol.Required("ip_address", description={"suggested_value": "192.168.1.100"}): str,
-    vol.Optional("report_interval", default=DEFAULT_SENSOR_REPORT_INTERVAL): vol.All(int, vol.Range(min=60, max=3600)),
-    vol.Optional("skip_validation", default=False): bool,
-})
+def _device_schema_light(ip_address: str) -> vol.Schema:
+    """Return a light setup schema with the selected IP carried forward."""
+    return vol.Schema({
+        vol.Required("ip_address", default=ip_address): str,
+        vol.Optional("min_kelvin", default=2000): vol.All(int, vol.Range(min=1000, max=10000)),
+        vol.Optional("max_kelvin", default=6500): vol.All(int, vol.Range(min=1000, max=10000)),
+        vol.Optional("skip_validation", default=False): bool,
+    })
+
+
+def _device_schema_sensor(ip_address: str) -> vol.Schema:
+    """Return an environment sensor setup schema with the selected IP carried forward."""
+    return vol.Schema({
+        vol.Required("ip_address", default=ip_address): str,
+        vol.Optional("report_interval", default=DEFAULT_SENSOR_REPORT_INTERVAL): vol.All(int, vol.Range(min=MIN_SENSOR_REPORT_INTERVAL, max=3600)),
+        vol.Optional("skip_validation", default=False): bool,
+    })
+
+
+def _report_interval_default(config_entry: config_entries.ConfigEntry) -> int:
+    """Return a valid report interval default for the options form."""
+    return max(
+        MIN_SENSOR_REPORT_INTERVAL,
+        int(
+            config_entry.options.get(
+                "report_interval",
+                config_entry.data.get("report_interval", DEFAULT_SENSOR_REPORT_INTERVAL),
+            )
+        ),
+    )
 
 class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for CozyLife integration."""
@@ -39,12 +88,50 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_POLL
 
     async def async_step_user(self, user_input: Optional[Dict[str, Any]] = None) -> FlowResult:
-        """Handle the initial step - asking for a single IP."""
+        """Handle the initial step."""
         errors: Dict[str, str] = {}
 
         if user_input is not None:
-            ip_address = user_input["ip_address"]
+            ip_address = user_input.get("ip_address", "").strip()
+            network_cidr = user_input.get("network_cidr", AUTO_NETWORK)
+            sleeping_sensor = user_input.get("sleeping_sensor", False)
             skip_validation = user_input.get("skip_validation", False)
+
+            if not ip_address:
+                if sleeping_sensor:
+                    errors["base"] = "ip_required_for_sleeping_sensor"
+                    return self.async_show_form(
+                        step_id="user",
+                        data_schema=DATA_SCHEMA,
+                        errors=errors,
+                    )
+                if skip_validation:
+                    errors["base"] = "ip_required_for_skip_validation"
+                    return self.async_show_form(
+                        step_id="user",
+                        data_schema=DATA_SCHEMA,
+                        errors=errors,
+                    )
+                return await self._async_discover_devices(network_cidr)
+
+            try:
+                ipaddress.ip_address(ip_address)
+            except ValueError:
+                errors["ip_address"] = "invalid_ip"
+                return self.async_show_form(
+                    step_id="user",
+                    data_schema=DATA_SCHEMA,
+                    errors=errors,
+                )
+
+            if self._is_device_configured(ip_address):
+                return self.async_abort(reason="already_configured")
+
+            if sleeping_sensor:
+                return await self._async_create_sleeping_sensor_entry(
+                    ip_address,
+                    user_input,
+                )
 
             if skip_validation:
                 _LOGGER.info(f"Skipping validation for {ip_address} as requested for development.")
@@ -71,6 +158,63 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user", data_schema=DATA_SCHEMA, errors=errors
         )
+
+    async def _async_create_sleeping_sensor_entry(
+        self,
+        ip_address: str,
+        user_input: Dict[str, Any],
+    ) -> FlowResult:
+        """Create a temp/humidity sensor entry without waking the device."""
+        device_id = f"sleeping_sensor_{ip_address}"
+        await self.async_set_unique_id(device_id)
+        self._abort_if_unique_id_configured()
+
+        return self.async_create_entry(
+            title=f"CozyLife Temp/Humidity @ {ip_address}",
+            data={
+                "ip_address": ip_address,
+                "device_id": device_id,
+                "pid": SLEEPING_SENSOR_PID,
+                "device_type_code": SENSOR_TYPE_CODE,
+                "dpids": SLEEPING_SENSOR_DPIDS,
+                "report_interval": user_input.get(
+                    "report_interval",
+                    DEFAULT_SENSOR_REPORT_INTERVAL,
+                ),
+            },
+        )
+
+    async def async_step_select_device(
+        self,
+        user_input: Optional[Dict[str, Any]] = None,
+    ) -> FlowResult:
+        """Let the user choose one of the discovered CozyLife devices."""
+        discovered_devices = getattr(self, "_discovered_devices", {})
+        if not discovered_devices:
+            return self.async_show_form(
+                step_id="user",
+                data_schema=DATA_SCHEMA,
+                errors={"base": "no_devices_found"},
+            )
+
+        if user_input is not None:
+            ip_address = user_input["device"]
+            device = discovered_devices.get(ip_address)
+            if self._is_device_configured(
+                ip_address,
+                device.device_id if device else None,
+            ):
+                return self.async_abort(reason="already_configured")
+
+            return await self._async_create_entry_from_ip(
+                ip_address,
+                2000,
+                6500,
+                DEFAULT_SENSOR_REPORT_INTERVAL,
+                {"ip_address": ip_address},
+            )
+
+        return self._show_discovered_devices_form(discovered_devices)
     
     @staticmethod
     @callback
@@ -78,10 +222,134 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Get the options flow for this handler."""
         return CozyLifeOptionsFlow(config_entry)
 
-    async def _async_create_entry_from_ip(self, ip_address: str, min_kelvin: int, max_kelvin: int, report_interval: int, user_input: Dict[str, Any]) -> FlowResult:
+    async def _async_discover_devices(self, network_cidr: str) -> FlowResult:
+        """Scan the network and show discovered CozyLife devices."""
+        errors: Dict[str, str] = {}
+        try:
+            devices = await async_discover_devices(self.hass, network_cidr)
+        except NetworkScanTooLarge:
+            errors["base"] = "network_too_large"
+        except NoNetworkAvailable:
+            errors["base"] = "no_network"
+        except ValueError:
+            errors["base"] = "invalid_network"
+        except Exception:
+            _LOGGER.exception("Unexpected error during CozyLife network discovery")
+            errors["base"] = "unknown"
+
+        if errors:
+            return self.async_show_form(
+                step_id="user",
+                data_schema=DATA_SCHEMA,
+                errors=errors,
+            )
+
+        discovered_devices = {
+            device.ip_address: device for device in devices
+        }
+        self._add_configured_devices_to_discovery(discovered_devices)
+
+        if not discovered_devices:
+            return self.async_show_form(
+                step_id="user",
+                data_schema=DATA_SCHEMA,
+                errors={"base": "no_devices_found"},
+            )
+
+        self._discovered_devices = discovered_devices
+        return self._show_discovered_devices_form(self._discovered_devices)
+
+    def _show_discovered_devices_form(
+        self,
+        discovered_devices: Dict[str, Any],
+    ) -> FlowResult:
+        """Show a selector for devices found by network discovery."""
+        configured_ips, configured_device_ids = self._configured_device_keys()
+        device_options = {
+            ip_address: (
+                f"{device.label} - already added"
+                if (
+                    ip_address in configured_ips
+                    or (
+                        device.device_id is not None
+                        and device.device_id in configured_device_ids
+                    )
+                )
+                else device.label
+            )
+            for ip_address, device in discovered_devices.items()
+        }
+        return self.async_show_form(
+            step_id="select_device",
+            data_schema=vol.Schema({vol.Required("device"): vol.In(device_options)}),
+            errors={},
+            description_placeholders={
+                "count": str(len(discovered_devices)),
+            },
+        )
+
+    def _add_configured_devices_to_discovery(
+        self,
+        discovered_devices: Dict[str, DiscoveredDevice],
+    ) -> None:
+        """Include existing CozyLife entries in the discovery selector."""
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            ip_address = entry.data.get("ip_address")
+            if not ip_address or ip_address in discovered_devices:
+                continue
+
+            dpids = entry.data.get("dpids") or ()
+            discovered_devices[ip_address] = DiscoveredDevice(
+                ip_address=ip_address,
+                device_id=entry.data.get("device_id"),
+                pid=entry.data.get("pid"),
+                device_type_code=entry.data.get("device_type_code"),
+                device_model_name=entry.title or "CozyLife Device",
+                dpids=tuple(str(dpid) for dpid in dpids),
+            )
+
+    def _configured_device_keys(self) -> tuple[set[str], set[str]]:
+        """Return configured IP addresses and device IDs for this integration."""
+        configured_ips: set[str] = set()
+        configured_device_ids: set[str] = set()
+
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if ip_address := entry.data.get("ip_address"):
+                configured_ips.add(ip_address)
+            if device_id := entry.data.get("device_id"):
+                configured_device_ids.add(device_id)
+            if entry.unique_id:
+                configured_device_ids.add(entry.unique_id)
+
+        return configured_ips, configured_device_ids
+
+    def _is_device_configured(
+        self,
+        ip_address: str | None,
+        device_id: str | None = None,
+    ) -> bool:
+        """Return true if an IP address or device ID is already configured."""
+        configured_ips, configured_device_ids = self._configured_device_keys()
+        return (
+            ip_address in configured_ips
+            or (
+                device_id is not None
+                and device_id in configured_device_ids
+            )
+        )
+
+    async def _async_create_entry_from_ip(
+        self,
+        ip_address: str,
+        min_kelvin: int,
+        max_kelvin: int,
+        report_interval: int,
+        user_input: Dict[str, Any],
+    ) -> FlowResult:
         """Helper to create a config entry from a single IP address."""
         errors: Dict[str, str] = {}
         try:
+            await async_load_model_catalog(self.hass)
             device = CozyLifeDevice(ip_address)
             if not await device.async_update_device_info():
                  errors["base"] = "cannot_connect"
@@ -90,18 +358,9 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
 
                 dpids = device.dpid or []
-                is_sensor = (
-                    device.pid in KNOWN_SENSOR_PIDS
-                    or (
-                        SENSOR_TEMPERATURE in dpids
-                        and SENSOR_BATTERY in dpids
-                        and SWITCH not in dpids
-                    )
-                )
-                is_light = (
-                    not is_sensor
-                    and device.device_type_code in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]
-                )
+                classification = classify_device(device.pid, device.device_type_code, dpids)
+                is_sensor = classification.is_environment_sensor
+                is_light = classification.is_light
 
                 # If this is a light and kelvin fields weren't provided yet, re-show with light schema
                 if is_light and "min_kelvin" not in user_input:
@@ -110,7 +369,7 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._device_model_name = device.device_model_name
                     return self.async_show_form(
                         step_id="user",
-                        data_schema=DATA_SCHEMA_LIGHT,
+                        data_schema=_device_schema_light(ip_address),
                         errors={},
                         description_placeholders={"ip_address": ip_address},
                     )
@@ -122,7 +381,7 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._device_model_name = device.device_model_name
                     return self.async_show_form(
                         step_id="user",
-                        data_schema=DATA_SCHEMA_SENSOR,
+                        data_schema=_device_schema_sensor(ip_address),
                         errors={},
                         description_placeholders={"ip_address": ip_address},
                     )
@@ -166,25 +425,20 @@ class CozyLifeOptionsFlow(config_entries.OptionsFlow):
 
         dpids = self._config_entry.data.get("dpids") or []
         pid = self._config_entry.data.get("pid", "")
-        is_sensor = (
-            pid in KNOWN_SENSOR_PIDS
-            or (
-                SENSOR_TEMPERATURE in dpids
-                and SENSOR_BATTERY in dpids
-                and SWITCH not in dpids
-            )
+        classification = classify_device(
+            pid,
+            self._config_entry.data.get("device_type_code"),
+            dpids,
         )
-        is_light = (
-            not is_sensor
-            and self._config_entry.data.get("device_type_code") in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]
-        )
+        is_sensor = classification.is_environment_sensor
+        is_light = classification.is_light
 
         schema_fields: Dict[Any, Any] = {}
         if is_light:
             schema_fields[vol.Optional("min_kelvin", default=self._config_entry.data.get("min_kelvin", 2000))] = vol.All(int, vol.Range(min=1000, max=10000))
             schema_fields[vol.Optional("max_kelvin", default=self._config_entry.data.get("max_kelvin", 6500))] = vol.All(int, vol.Range(min=1000, max=10000))
         if is_sensor:
-            schema_fields[vol.Optional("report_interval", default=self._config_entry.data.get("report_interval", DEFAULT_SENSOR_REPORT_INTERVAL))] = vol.All(int, vol.Range(min=60, max=3600))
+            schema_fields[vol.Optional("report_interval", default=_report_interval_default(self._config_entry))] = vol.All(int, vol.Range(min=MIN_SENSOR_REPORT_INTERVAL, max=3600))
             schema_fields[vol.Optional("temp_sensitivity", default=self._config_entry.options.get("temp_sensitivity", 5))] = vol.All(int, vol.Range(min=5, max=30))
             schema_fields[vol.Optional("humidity_sensitivity", default=self._config_entry.options.get("humidity_sensitivity", 5))] = vol.All(int, vol.Range(min=5, max=30))
         schema_fields[vol.Optional("enable_debug", default=self._config_entry.options.get("enable_debug", False))] = bool
