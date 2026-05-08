@@ -1,21 +1,19 @@
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
-from homeassistant.components.switch import SwitchEntity
+from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE, SENSOR_TEMPERATURE, SENSOR_BATTERY, SWITCH as SWITCH_DPID, KNOWN_SENSOR_PIDS
+from .const import DOMAIN
 from .coordinator import CozyLifeCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-# The DPID used for controlling all switch gangs via a bitmask.
-BITMASK_DPID = '1'
-# Countdown timer DPIDs for each gang (gang 1-8)
-COUNTDOWN_DPIDS = ['2', '4', '6', '8', '10', '12', '14', '16']
+# The DPID used for controlling all switch/outlet gangs via a bitmask.
+BITMASK_DPID = "1"
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -29,65 +27,33 @@ async def async_setup_entry(
         _LOGGER.error(f"Missing DPID list for {coordinator.device.ip_address}. Cannot set up switch.")
         return
 
-    # Skip temp/humidity sensors — identified by PID or DPID pattern
-    if (coordinator.device.pid in KNOWN_SENSOR_PIDS or (
-        SENSOR_TEMPERATURE in coordinator.device.dpid
-        and SENSOR_BATTERY in coordinator.device.dpid
-        and SWITCH_DPID not in coordinator.device.dpid
-    )):
-        _LOGGER.debug(f"Device {coordinator.device.ip_address} is a sensor (has DPIDs 8,9 but not 1), skipping switch platform setup.")
-        return
-
-    # Skip devices that are lights by checking for light-specific DPIDs
-    # - DPID '3' (TEMP - color temperature) exists in dimmable/RGB lights, never in switches
-    # - DPID '6' (SAT - saturation) exists in RGB lights, never in switches
-    # - Multi-gang switches have DPID '2' and '4' (countdown timers), but simple lights only have '2'
-    # DO NOT check device type code here - switches often report incorrect type codes
-    from .const import TEMP, SAT, WORK_MODE, BRIGHT, HUE, LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE
-
-    has_work_mode = WORK_MODE in coordinator.device.dpid  # WORK_MODE='2'
-    has_temp = TEMP in coordinator.device.dpid            # TEMP='3'
-    has_bright = BRIGHT in coordinator.device.dpid        # BRIGHT='4'
-    has_hue = HUE in coordinator.device.dpid              # HUE='5'
-    has_saturation = SAT in coordinator.device.dpid       # SAT='6'
-    is_light_type = coordinator.device.device_type_code in [LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]
-
-    # Definitive light indicators:
-    # 1. Has TEMP (3) -> CCT Light
-    # 2. Has SAT (6) AND HUE (5) -> RGB Light
-    #    (Note: DPID 6 is also 'countdown_3' for switches.
-    #     Standard 3-gang switches have 6 but NOT 5.
-    #     If a device has both 5 and 6, we check the type code to be sure it's not an advanced switch.)
-    if has_temp or (has_saturation and has_hue and is_light_type):
-        _LOGGER.debug(f"Device {coordinator.device.ip_address} has light-specific DPIDs (TEMP='3' or SAT='6'+HUE='5'+Type='Light'), skipping switch platform setup.")
-        return
-
-    # Simple light case: has DPID 2 (work_mode) but not DPID 4 (brightness/countdown_2)
-    # AND reports light type code - this is a simple on/off light
-    if has_work_mode and not has_bright and is_light_type:
-        _LOGGER.debug(f"Device {coordinator.device.ip_address} appears to be a simple light (has DPID 2 but not 4, with light type code), skipping switch platform setup.")
-        return
-
-    entities = []
-    # Check if the primary bitmask DPID is supported by the device.
-    if BITMASK_DPID in coordinator.device.dpid:
-        # Auto-detect number of gangs by counting countdown timer DPIDs
-        num_gangs = sum(1 for dpid in COUNTDOWN_DPIDS if dpid in coordinator.device.dpid)
-
-        if num_gangs == 0:
-            # Fallback: assume 1 gang if no countdown DPIDs found
-            num_gangs = 1
-
-        _LOGGER.info(f"Detected {num_gangs}-gang switch at {coordinator.device.ip_address} with DPIDs: {coordinator.device.dpid}")
-
-        # Create an entity for each gang
-        for i in range(num_gangs):
-            entities.append(CozyLifeSwitch(coordinator, gang_bit=i))
-    else:
-        _LOGGER.info(
-            f"No switch entities created for device {coordinator.device.ip_address}. "
-            f"The required bitmask DPID '{BITMASK_DPID}' was not found in the device's reported DPIDs: {coordinator.device.dpid}."
+    if not coordinator.classification.supports_switch_entities:
+        _LOGGER.debug(
+            "Device %s (Type: %s, Source: %s) does not support switch entities, "
+            "skipping switch platform setup.",
+            coordinator.device.ip_address,
+            coordinator.classification.effective_type_code,
+            coordinator.classification.source,
         )
+        return
+
+    entity_count = coordinator.classification.switch_entity_count
+    _LOGGER.info(
+        "Detected %s %s entity/entities at %s with DPIDs: %s",
+        entity_count,
+        "outlet" if coordinator.classification.is_outlet else "switch",
+        coordinator.device.ip_address,
+        coordinator.device.dpid,
+    )
+
+    entities = [
+        CozyLifeSwitch(
+            coordinator,
+            gang_bit=gang_bit,
+            total_entities=entity_count,
+        )
+        for gang_bit in range(entity_count)
+    ]
 
     if entities:
         async_add_entities(entities)
@@ -96,7 +62,12 @@ async def async_setup_entry(
 class CozyLifeSwitch(CoordinatorEntity[CozyLifeCoordinator], SwitchEntity):
     """Representation of a single gang on a CozyLife Switch using a bitmask."""
 
-    def __init__(self, coordinator: CozyLifeCoordinator, gang_bit: int):
+    def __init__(
+        self,
+        coordinator: CozyLifeCoordinator,
+        gang_bit: int,
+        total_entities: int,
+    ):
         """
         Initialize the CozyLife Switch.
         Args:
@@ -106,11 +77,19 @@ class CozyLifeSwitch(CoordinatorEntity[CozyLifeCoordinator], SwitchEntity):
         super().__init__(coordinator)
         self._gang_bit = gang_bit
         self._gang_number = gang_bit + 1
+        self._total_entities = total_entities
+        self._is_outlet = coordinator.classification.is_outlet
         
         device_name = coordinator.device.device_model_name or "CozyLife Switch"
-        
-        self._attr_name = f"{device_name} {self._gang_number}"
+        if total_entities == 1:
+            self._attr_name = device_name
+        else:
+            entity_label = "Outlet" if self._is_outlet else "Switch"
+            self._attr_name = f"{device_name} {entity_label} {self._gang_number}"
         self._attr_unique_id = f"{coordinator.device.device_id}_{self._gang_number}"
+        self._attr_device_class = (
+            SwitchDeviceClass.OUTLET if self._is_outlet else SwitchDeviceClass.SWITCH
+        )
 
     @property
     def device_info(self) -> DeviceInfo:
