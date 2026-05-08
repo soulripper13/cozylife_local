@@ -1,0 +1,19 @@
+# Python generated files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local Python environments and tooling
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Home Assistant local/runtime files
+.storage/
+home-assistant.log*
+home-assistant_v2.db*
+
+# macOS
+.DS_Store
