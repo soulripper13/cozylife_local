@@ -1,0 +1,55 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "CozyLife Local",
+        "description": "Enter a device IP address to add one device, or leave IP Address empty and submit to scan the local network. For battery temperature/humidity sensors that are asleep during setup, enter the IP address and enable Sleeping temp/humidity sensor.",
+        "data": {
+          "ip_address": "IP address",
+          "max_kelvin": "Maximum Kelvin",
+          "min_kelvin": "Minimum Kelvin",
+          "network_cidr": "Network CIDR",
+          "report_interval": "Report interval",
+          "sleeping_sensor": "Sleeping temp/humidity sensor",
+          "skip_validation": "Skip validation"
+        }
+      },
+      "select_device": {
+        "title": "CozyLife Local",
+        "description": "{count} CozyLife device(s) found or already configured. Select one to add.",
+        "data": {
+          "device": "Device"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the device.",
+      "invalid_ip": "Enter a valid IP address.",
+      "invalid_network": "Enter a valid IPv4 network CIDR, such as 192.168.1.0/24, or use auto.",
+      "ip_required_for_sleeping_sensor": "Enter an IP address when adding a sleeping temp/humidity sensor.",
+      "ip_required_for_skip_validation": "Enter an IP address when using skip validation.",
+      "network_too_large": "The network is too large to scan from setup. Use a /24 network or smaller.",
+      "no_devices_found": "No CozyLife devices were found on the selected network.",
+      "no_network": "Home Assistant could not detect a local IPv4 network. Enter a network CIDR manually.",
+      "timeout_connect": "Timed out while connecting to the device.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This CozyLife device is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "enable_debug": "Enable debug logging",
+          "humidity_sensitivity": "Humidity sensitivity",
+          "max_kelvin": "Maximum Kelvin",
+          "min_kelvin": "Minimum Kelvin",
+          "report_interval": "Report interval",
+          "temp_sensitivity": "Temperature sensitivity"
+        }
+      }
+    }
+  }
+}
