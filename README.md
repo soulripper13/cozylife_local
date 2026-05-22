@@ -1,12 +1,21 @@
 # Home Assistant CozyLife Local Integration
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+[![Support Development](https://img.shields.io/badge/Support-Development-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/soulripper13)
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/soulripper13/cozylife_local)
-
-This is a custom integration for Home Assistant to control CozyLife smart devices. It communicates with devices **100% locally**, removing any dependency on cloud services for operation.
-
-This integration was developed to provide a modern, robust, and easy-to-use alternative to older CozyLife integrations, with a focus on local control and a smooth user experience.
+<div align="center">
+  <img src="https://dummyimage.com/800x60/0d1117/ffffff&text=CozyLife%20Local+-+100%25%20Local%20Home%20Assistant%20Integration" alt="Hero Banner">
+  <br><br>
+  <strong>100% local Home Assistant integration for CozyLife smart devices. Control your switches, lights, and sensors without any cloud dependency.</strong> 
+  <br><br> 
+  <a href="https://ko-fi.com/soulripper13">
+    <img src="https://storage.ko-fi.com/cdn/kofi5.png?v=6" alt="Support CozyLife Local on Ko-fi" width="220">
+  </a>
+</div>
 
 ---
+
+
+
 
 ## ⚠️ Beta / Testing Phase
 
@@ -30,7 +39,6 @@ If you have one of these devices, please install the integration and report your
 
 Please [open an issue](https://github.com/soulripper13/cozylife_local/issues) with this information to help improve device compatibility.
 
----
 
 ## Features
 
@@ -207,7 +215,6 @@ This integration exposes Home Assistant entities for:
 
 The bundled CozyLife model catalog includes additional categories such as motors, cameras/locks, gateways, AI conversation devices, and smart speakers. Those categories may be detected for classification, but this integration does not currently expose full Home Assistant entities for them unless listed above.
 
----
 
 ## Common Issues & FAQ
 
@@ -287,7 +294,6 @@ If your device is classified as a light and has DPIDs `5` (Hue) and `6` (Saturat
 DPIDs=['1', '2', '3', '4', '5', '6']
 ```
 
----
 
 ## Contributing
 
@@ -305,16 +311,38 @@ When reporting issues, always include:
 - Integration version
 - Description of the issue
 
----
 
 ## Credits
 
 This integration builds upon knowledge from the original CozyLife integrations and community contributions. Special thanks to all users who test and provide feedback!
 
 ---
+## Support the Project
 
-## License
+This project is developed and maintained in spare time and is provided free to the community.
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+If you find it useful and would like to support ongoing development, maintenance, and improvements, any contribution is appreciated — but never required ❤️
 
----
+### Ways to Support
+
+* **Ko-fi**
+  [https://ko-fi.com/soulripper13](https://ko-fi.com/soulripper13)
+
+* **PayPal**
+  [https://paypal.me/SKatoaroo](https://paypal.me/SKatoaroo)
+
+* **Bitcoin (BTC)**
+  `bc1qvu8a9gdy3dcxa94jge7d3rd7claapsydjsjxn0`
+
+* **Solana (SOL)**
+  `4jvCR2YFQLqguoyz9qAMPzVbaEcDsG5nzRHFG8SeaeBK`
+
+You can also help by:
+
+* Reporting bugs
+* Submitting pull requests
+* Suggesting features
+* Helping other users
+* Starring the repository ⭐
+
+Thank you for being part of the community.
