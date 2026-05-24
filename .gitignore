@@ -15,5 +15,12 @@ venv/
 home-assistant.log*
 home-assistant_v2.db*
 
+# Local sensor monitor captures
+cozylife_sensor_logs/
+scripts/cozylife-sensor-*.csv
+scripts/cozylife-sensor-*.jsonl
+cozylife-monitor.out
+cozylife-monitor.pid
+
 # macOS
 .DS_Store
