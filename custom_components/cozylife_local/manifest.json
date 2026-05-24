@@ -6,6 +6,7 @@
   "config_flow": true,
   "documentation": "https://github.com/soulripper13/cozylife_local",
   "issue_tracker": "https://github.com/soulripper13/cozylife_local/issues",
+  "after_dependencies": ["network"],
   "requirements": [],
   "iot_class": "local_polling"
 }
