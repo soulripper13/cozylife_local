@@ -1,5 +1,5 @@
-import asyncio
 import logging
+import math
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
@@ -12,7 +12,9 @@ from .cozylife_api import CozyLifeDevice
 from .const import (
     DEFAULT_SENSOR_REPORT_INTERVAL,
     MIN_SENSOR_REPORT_INTERVAL,
+    SENSOR_HUMIDITY,
     SENSOR_HUMIDITY_SENSITIVITY_DPID,
+    SENSOR_TEMPERATURE,
     SENSOR_REPORT_INTERVAL_DPID,
     SENSOR_TEMP_SENSITIVITY_DPID,
 )
@@ -26,13 +28,56 @@ UPDATE_INTERVAL = timedelta(seconds=30)
 SENSOR_WAKE_WINDOW_LEAD = 10
 SENSOR_CATCH_POLL_INTERVAL = 1
 SENSOR_CATCH_TIMEOUT = 120
-SENSOR_FALLBACK_POLL_INTERVAL = 60
 REPORT_INTERVAL_IGNORED_LIMIT = 3
+ENVIRONMENT_SENSOR_MEASUREMENTS = {
+    SENSOR_TEMPERATURE: "temperature",
+    SENSOR_HUMIDITY: "humidity",
+}
 
 
 def _next_sensor_wake_delay(report_interval: int) -> int:
     """Return how long to wait before polling near the next expected wake."""
     return max(SENSOR_CATCH_POLL_INTERVAL, report_interval - SENSOR_WAKE_WINDOW_LEAD)
+
+
+def _next_sensor_cycle_delay(
+    last_response_at: datetime,
+    report_interval: int,
+    now: datetime,
+) -> int:
+    """Return delay to the next expected wake window from a previous response."""
+    elapsed = max(0, (now - last_response_at).total_seconds())
+    cycle = math.floor((elapsed + SENSOR_WAKE_WINDOW_LEAD) / report_interval) + 1
+    next_window_elapsed = (cycle * report_interval) - SENSOR_WAKE_WINDOW_LEAD
+    return max(
+        SENSOR_CATCH_POLL_INTERVAL,
+        int(next_window_elapsed - elapsed),
+    )
+
+
+def _is_valid_environment_measurement(
+    dpid: str,
+    value: Any,
+    *,
+    zero_is_placeholder: bool,
+) -> bool:
+    """Return whether a temperature/humidity reading looks like a real report."""
+    if not isinstance(value, (int, float)):
+        return False
+
+    # Z4tRml can intermittently report 0 while asleep/waking. Treat that as a
+    # placeholder so Home Assistant does not record false zero spikes.
+    if zero_is_placeholder and value == 0:
+        return False
+
+    if dpid == SENSOR_TEMPERATURE:
+        return -400 <= value <= 800
+
+    if dpid == SENSOR_HUMIDITY:
+        return 0 < value <= 100
+
+    return True
+
 
 class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
     """Manages fetching data from a single CozyLife device."""
@@ -77,6 +122,8 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self._missed_expected_wake_logged = False
         self._catch_started_at: datetime | None = None
         self._fallback_logged = False
+        self._last_sensor_response_at: datetime | None = None
+        self._first_success_wait_logged = False
         self._report_interval_ignored_count = 0
         self._report_interval_unsupported = False
         if self.classification.is_environment_sensor:
@@ -97,11 +144,13 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         if not self._uses_sensor_polling:
             return
 
+        self._last_sensor_response_at = dt_util.utcnow()
         delay = _next_sensor_wake_delay(int(self._effective_report_interval))
         self.update_interval = timedelta(seconds=delay)
         self._missed_expected_wake_logged = False
         self._catch_started_at = None
         self._fallback_logged = False
+        self._first_success_wait_logged = False
         _LOGGER.debug(
             "[COZYLIFE] Sensor %s responded; next poll window starts in %ss "
             "(effective report interval: %ss)",
@@ -121,18 +170,36 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
         catch_seconds = (now - self._catch_started_at).total_seconds()
         if catch_seconds >= SENSOR_CATCH_TIMEOUT:
-            self.update_interval = timedelta(seconds=SENSOR_FALLBACK_POLL_INTERVAL)
+            if self._last_sensor_response_at is None:
+                self.update_interval = timedelta(seconds=SENSOR_CATCH_POLL_INTERVAL)
+                if not self._first_success_wait_logged:
+                    self._first_success_wait_logged = True
+                    _LOGGER.debug(
+                        "[COZYLIFE] Sensor %s has not responded yet; continuing "
+                        "first-acquisition polling every %ss so the short wake "
+                        "window is not missed.",
+                        self.device.ip_address,
+                        SENSOR_CATCH_POLL_INTERVAL,
+                    )
+                return
+
+            delay = _next_sensor_cycle_delay(
+                self._last_sensor_response_at,
+                int(self._effective_report_interval),
+                now,
+            )
+            self.update_interval = timedelta(seconds=delay)
+            self._catch_started_at = None
             if not self._fallback_logged:
                 self._fallback_logged = True
                 _LOGGER.debug(
                     "[COZYLIFE] Sensor %s did not respond within %ss of the "
-                    "expected wake window; falling back to %ss polling. The "
-                    "device may not apply report_interval=%ss until its own "
-                    "next full wake cycle.",
+                    "expected wake window; next poll window starts in %ss "
+                    "based on report_interval=%ss.",
                     self.device.ip_address,
                     SENSOR_CATCH_TIMEOUT,
-                    SENSOR_FALLBACK_POLL_INTERVAL,
-                    self._report_interval,
+                    delay,
+                    self._effective_report_interval,
                 )
             return
 
@@ -145,6 +212,53 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                 self.device.ip_address,
                 SENSOR_CATCH_POLL_INTERVAL,
             )
+
+    def _preserve_environment_measurements(
+        self,
+        state_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Keep the last good temp/humidity values across placeholder reports."""
+        if not self.classification.is_environment_sensor:
+            return state_data
+
+        previous_data = self.data or {}
+        sanitized = dict(state_data)
+        zero_is_placeholder = self.device.pid == "Z4tRml"
+
+        for dpid, name in ENVIRONMENT_SENSOR_MEASUREMENTS.items():
+            current = sanitized.get(dpid)
+            previous = previous_data.get(dpid)
+            if _is_valid_environment_measurement(
+                dpid,
+                current,
+                zero_is_placeholder=zero_is_placeholder,
+            ):
+                continue
+
+            if _is_valid_environment_measurement(
+                dpid,
+                previous,
+                zero_is_placeholder=zero_is_placeholder,
+            ):
+                sanitized[dpid] = previous
+                _LOGGER.debug(
+                    "[COZYLIFE] Ignoring invalid %s reading from %s: %r; "
+                    "preserving previous value %r",
+                    name,
+                    self.device.ip_address,
+                    current,
+                    previous,
+                )
+            elif dpid in sanitized:
+                sanitized.pop(dpid)
+                _LOGGER.debug(
+                    "[COZYLIFE] Ignoring invalid %s reading from %s: %r",
+                    name,
+                    self.device.ip_address,
+                    current,
+                )
+
+        return sanitized
 
     async def _async_update_data(self) -> Dict[str, Any]:
         """Fetch data from device."""
@@ -235,6 +349,7 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                     _LOGGER.debug(f"[COZYLIFE] Pushing sensitivity settings {updates} to {self.device.ip_address}")
                     await self.device.async_set_state(updates)
 
+            state_data = self._preserve_environment_measurements(state_data)
             self._schedule_next_sensor_wake()
             _LOGGER.debug(f"[COZYLIFE] Successfully fetched state for {self.device.ip_address}: {state_data}")
             return state_data

@@ -10,6 +10,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
     EntityCategory,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
@@ -18,6 +20,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
@@ -134,13 +137,18 @@ class PlugSensorDescription:
         self.scale = scale
 
 
-class CozyLifeSensorBase(CoordinatorEntity[CozyLifeCoordinator], SensorEntity):
+class CozyLifeSensorBase(
+    CoordinatorEntity[CozyLifeCoordinator],
+    SensorEntity,
+    RestoreEntity,
+):
     """Base class for CozyLife sensors."""
 
     def __init__(self, coordinator: CozyLifeCoordinator, entry: ConfigEntry, sensor_type: str):
         super().__init__(coordinator)
         self._sensor_type = sensor_type
         self._attr_unique_id = f"{coordinator.device.device_id}_{sensor_type}"
+        self._last_valid_native_value: float | None = None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -153,7 +161,38 @@ class CozyLifeSensorBase(CoordinatorEntity[CozyLifeCoordinator], SensorEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
+        if (value := self._native_value_from_data()) is not None:
+            self._last_valid_native_value = value
         self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last recorded value while sleeping sensors are offline."""
+        await super().async_added_to_hass()
+
+        last_state = await self.async_get_last_state()
+        if last_state is None or last_state.state in {
+            STATE_UNAVAILABLE,
+            STATE_UNKNOWN,
+        }:
+            return
+
+        try:
+            self._last_valid_native_value = float(last_state.state)
+        except (TypeError, ValueError):
+            return
+
+    def _native_value_from_data(self) -> Optional[float]:
+        """Return the current native value from coordinator data."""
+        raise NotImplementedError
+
+    @property
+    def native_value(self) -> Optional[float]:
+        value = self._native_value_from_data()
+        if value is not None:
+            self._last_valid_native_value = value
+            return value
+
+        return self._last_valid_native_value
 
 
 class CozyLifeTemperatureSensor(CozyLifeSensorBase):
@@ -167,9 +206,8 @@ class CozyLifeTemperatureSensor(CozyLifeSensorBase):
         super().__init__(coordinator, entry, "temperature")
         self._attr_name = f"{coordinator.device.device_model_name} Temperature"
 
-    @property
-    def native_value(self) -> Optional[float]:
-        raw = self.coordinator.data.get(SENSOR_TEMPERATURE)
+    def _native_value_from_data(self) -> Optional[float]:
+        raw = (self.coordinator.data or {}).get(SENSOR_TEMPERATURE)
         if raw is None:
             return None
         return round(raw / 10, 1)
@@ -186,9 +224,8 @@ class CozyLifeHumiditySensor(CozyLifeSensorBase):
         super().__init__(coordinator, entry, "humidity")
         self._attr_name = f"{coordinator.device.device_model_name} Humidity"
 
-    @property
-    def native_value(self) -> Optional[float]:
-        raw = self.coordinator.data.get(SENSOR_HUMIDITY)
+    def _native_value_from_data(self) -> Optional[float]:
+        raw = (self.coordinator.data or {}).get(SENSOR_HUMIDITY)
         if raw is None:
             return None
         return float(raw)
@@ -206,9 +243,8 @@ class CozyLifeBatterySensor(CozyLifeSensorBase):
         super().__init__(coordinator, entry, "battery")
         self._attr_name = f"{coordinator.device.device_model_name} Battery"
 
-    @property
-    def native_value(self) -> Optional[float]:
-        raw = self.coordinator.data.get(SENSOR_BATTERY)
+    def _native_value_from_data(self) -> Optional[float]:
+        raw = (self.coordinator.data or {}).get(SENSOR_BATTERY)
         if raw is None:
             return None
         return round(raw / 10, 1)
