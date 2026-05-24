@@ -10,7 +10,7 @@
 [![Support via PayPal](https://img.shields.io/badge/Support-PayPal-00457C?style=for-the-badge&logo=paypal&logoColor=white)](https://paypal.me/SKatoaroo)
 
 <div align="center">
-  <img src="assets/hero_banner.png" alt="CozyLife Local Hero Banner" width="100%">
+  <img src="assets/hero_banner.jpeg" alt="CozyLife Local Hero Banner" width="100%">
   <br><br>
   <strong>A premium, 100% local Home Assistant integration for CozyLife smart devices. Control your switches, lights, smart plugs, and environment sensors securely without any cloud dependency.</strong> 
   <br><br> 
