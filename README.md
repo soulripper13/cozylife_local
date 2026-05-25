@@ -4,7 +4,7 @@
 [![GitHub Release](https://img.shields.io/github/release/soulripper13/cozylife_local.svg?style=for-the-badge)](https://github.com/soulripper13/cozylife_local/releases)
 [![GitHub License](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 [![GitHub Issues](https://img.shields.io/github/issues/soulripper13/cozylife_local.svg?style=for-the-badge)](https://github.com/soulripper13/cozylife_local/issues)
-[![GitHub Stars](https://img.shields.io/badge/Stars-10-blue.svg?style=for-the-badge&logo=github)](https://github.com/soulripper13/cozylife_local/stargazers)
+[![GitHub Stars](https://img.shields.io/github/stars/soulripper13/cozylife_local?style=for-the-badge&logo=github)](https://github.com/soulripper13/cozylife_local/stargazers)
 ![Maintenance](https://img.shields.io/maintenance/yes/2026.svg?style=for-the-badge)
 [![Support Development](https://img.shields.io/badge/Support-Development-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/soulripper13)
 [![Support via PayPal](https://img.shields.io/badge/Support-PayPal-00457C?style=for-the-badge&logo=paypal&logoColor=white)](https://paypal.me/SKatoaroo)
