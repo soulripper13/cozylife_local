@@ -13,6 +13,7 @@ from .const import (
     DOMAIN,
     DEFAULT_SENSOR_REPORT_INTERVAL,
     MIN_SENSOR_REPORT_INTERVAL,
+    STANDARD_SENSOR_REPORT_INTERVAL,
     SENSOR_BATTERY,
     SENSOR_HUMIDITY,
     SENSOR_HUMIDITY_SENSITIVITY_DPID,
@@ -50,6 +51,35 @@ SLEEPING_SENSOR_DPIDS = [
     SENSOR_TEMP_SENSITIVITY_DPID,
 ]
 
+EXPERIMENTAL_SHORT_INTERVAL_KEY = "experimental_short_interval"
+
+def _report_interval_schema() -> vol.All:
+    """Return report interval validation for sleeping environment sensors."""
+    return vol.All(int, vol.Range(min=MIN_SENSOR_REPORT_INTERVAL, max=3600))
+
+
+def _normalize_report_interval(report_interval: int, experimental: bool) -> int:
+    """Clamp report interval to the supported range for the selected mode."""
+    minimum = (
+        MIN_SENSOR_REPORT_INTERVAL
+        if experimental
+        else STANDARD_SENSOR_REPORT_INTERVAL
+    )
+    return min(3600, max(minimum, int(report_interval)))
+
+
+def _experimental_short_interval_default(
+    config_entry: config_entries.ConfigEntry,
+) -> bool:
+    """Return whether experimental short intervals are enabled."""
+    return bool(
+        config_entry.options.get(
+            EXPERIMENTAL_SHORT_INTERVAL_KEY,
+            config_entry.data.get(EXPERIMENTAL_SHORT_INTERVAL_KEY, False),
+        )
+    )
+
+
 def _device_schema_light(ip_address: str) -> vol.Schema:
     """Return a light setup schema with the selected IP carried forward."""
     return vol.Schema({
@@ -64,21 +94,39 @@ def _device_schema_sensor(ip_address: str) -> vol.Schema:
     """Return an environment sensor setup schema with the selected IP carried forward."""
     return vol.Schema({
         vol.Required("ip_address", default=ip_address): str,
-        vol.Optional("report_interval", default=DEFAULT_SENSOR_REPORT_INTERVAL): vol.All(int, vol.Range(min=MIN_SENSOR_REPORT_INTERVAL, max=3600)),
+        vol.Optional(EXPERIMENTAL_SHORT_INTERVAL_KEY, default=False): bool,
+        vol.Optional(
+            "report_interval",
+            default=DEFAULT_SENSOR_REPORT_INTERVAL,
+        ): _report_interval_schema(),
         vol.Optional("skip_validation", default=False): bool,
+    })
+
+
+def _sleeping_sensor_schema(ip_address: str) -> vol.Schema:
+    """Return sleeping environment sensor setup schema."""
+    return vol.Schema({
+        vol.Required("ip_address", default=ip_address): str,
+        vol.Optional("sleeping_sensor", default=True): bool,
+        vol.Optional(EXPERIMENTAL_SHORT_INTERVAL_KEY, default=False): bool,
+        vol.Optional(
+            "report_interval",
+            default=DEFAULT_SENSOR_REPORT_INTERVAL,
+        ): _report_interval_schema(),
     })
 
 
 def _report_interval_default(config_entry: config_entries.ConfigEntry) -> int:
     """Return a valid report interval default for the options form."""
-    return max(
-        MIN_SENSOR_REPORT_INTERVAL,
+    experimental = _experimental_short_interval_default(config_entry)
+    return _normalize_report_interval(
         int(
             config_entry.options.get(
                 "report_interval",
                 config_entry.data.get("report_interval", DEFAULT_SENSOR_REPORT_INTERVAL),
             )
         ),
+        experimental,
     )
 
 class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -128,6 +176,13 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_abort(reason="already_configured")
 
             if sleeping_sensor:
+                if "report_interval" not in user_input:
+                    return self.async_show_form(
+                        step_id="user",
+                        data_schema=_sleeping_sensor_schema(ip_address),
+                        errors={},
+                        description_placeholders={"ip_address": ip_address},
+                    )
                 return await self._async_create_sleeping_sensor_entry(
                     ip_address,
                     user_input,
@@ -177,9 +232,16 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "pid": SLEEPING_SENSOR_PID,
                 "device_type_code": SENSOR_TYPE_CODE,
                 "dpids": SLEEPING_SENSOR_DPIDS,
-                "report_interval": user_input.get(
-                    "report_interval",
-                    DEFAULT_SENSOR_REPORT_INTERVAL,
+                EXPERIMENTAL_SHORT_INTERVAL_KEY: user_input.get(
+                    EXPERIMENTAL_SHORT_INTERVAL_KEY,
+                    False,
+                ),
+                "report_interval": _normalize_report_interval(
+                    user_input.get(
+                        "report_interval",
+                        DEFAULT_SENSOR_REPORT_INTERVAL,
+                    ),
+                    user_input.get(EXPERIMENTAL_SHORT_INTERVAL_KEY, False),
                 ),
             },
         )
@@ -396,7 +458,19 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         "dpids": dpids,
                         "min_kelvin": min_kelvin if is_light else 2000,
                         "max_kelvin": max_kelvin if is_light else 6500,
-                        "report_interval": report_interval if is_sensor else DEFAULT_SENSOR_REPORT_INTERVAL,
+                        EXPERIMENTAL_SHORT_INTERVAL_KEY: (
+                            user_input.get(EXPERIMENTAL_SHORT_INTERVAL_KEY, False)
+                            if is_sensor
+                            else False
+                        ),
+                        "report_interval": (
+                            _normalize_report_interval(
+                                report_interval,
+                                user_input.get(EXPERIMENTAL_SHORT_INTERVAL_KEY, False),
+                            )
+                            if is_sensor
+                            else DEFAULT_SENSOR_REPORT_INTERVAL
+                        ),
                     }
                 )
         except asyncio.TimeoutError:
@@ -421,8 +495,30 @@ class CozyLifeOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: Optional[Dict[str, Any]] = None) -> FlowResult:
         """Manage the options."""
         if user_input is not None:
+            dpids = self._config_entry.data.get("dpids") or []
+            classification = classify_device(
+                self._config_entry.data.get("pid", ""),
+                self._config_entry.data.get("device_type_code"),
+                dpids,
+            )
+            if classification.is_environment_sensor:
+                user_input = dict(user_input)
+                user_input["report_interval"] = _normalize_report_interval(
+                    user_input.get(
+                        "report_interval",
+                        DEFAULT_SENSOR_REPORT_INTERVAL,
+                    ),
+                    user_input.get(EXPERIMENTAL_SHORT_INTERVAL_KEY, False),
+                )
             return self.async_create_entry(title="", data=user_input)
 
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self._options_schema(),
+        )
+
+    def _options_schema(self) -> vol.Schema:
+        """Return the options schema for this config entry."""
         dpids = self._config_entry.data.get("dpids") or []
         pid = self._config_entry.data.get("pid", "")
         classification = classify_device(
@@ -438,12 +534,21 @@ class CozyLifeOptionsFlow(config_entries.OptionsFlow):
             schema_fields[vol.Optional("min_kelvin", default=self._config_entry.data.get("min_kelvin", 2000))] = vol.All(int, vol.Range(min=1000, max=10000))
             schema_fields[vol.Optional("max_kelvin", default=self._config_entry.data.get("max_kelvin", 6500))] = vol.All(int, vol.Range(min=1000, max=10000))
         if is_sensor:
-            schema_fields[vol.Optional("report_interval", default=_report_interval_default(self._config_entry))] = vol.All(int, vol.Range(min=MIN_SENSOR_REPORT_INTERVAL, max=3600))
+            experimental = _experimental_short_interval_default(self._config_entry)
+            schema_fields[
+                vol.Optional(
+                    EXPERIMENTAL_SHORT_INTERVAL_KEY,
+                    default=experimental,
+                )
+            ] = bool
+            schema_fields[
+                vol.Optional(
+                    "report_interval",
+                    default=_report_interval_default(self._config_entry),
+                )
+            ] = _report_interval_schema()
             schema_fields[vol.Optional("temp_sensitivity", default=self._config_entry.options.get("temp_sensitivity", 5))] = vol.All(int, vol.Range(min=5, max=30))
             schema_fields[vol.Optional("humidity_sensitivity", default=self._config_entry.options.get("humidity_sensitivity", 5))] = vol.All(int, vol.Range(min=5, max=30))
         schema_fields[vol.Optional("enable_debug", default=self._config_entry.options.get("enable_debug", False))] = bool
 
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(schema_fields),
-        )
+        return vol.Schema(schema_fields)

@@ -105,6 +105,8 @@ Settings ➔ Devices & Services ➔ + Add Integration ➔ CozyLife Local
 *   **Sleeping temp/humidity sensor (Checkbox)**: Check this box **ONLY** if the IP you entered belongs to a battery-powered environmental sensor. (See [Sleeping Battery-Powered Sensors](#sleeping-battery-powered-sensors-temphumidity) below).
 *   **Skip validation (Developer Option)**: Enables advanced users and developers to add a device manually without verification. Great for remote environments or provisioning devices that are temporarily powered down.
 
+After setup, the integration exposes the configured local IP address as a diagnostic sensor on the Home Assistant device page. Use that visible IP when checking DHCP reservations, router firewall rules, or direct port `5555` connectivity.
+
 ---
 
 ## 4. Device-Specific Guides & Behaviors
@@ -160,7 +162,59 @@ Battery-powered sensors (such as environment sensors and button controllers) use
 6. **Activating the Sensor**: To push the first set of readings immediately:
    * Press the physical button on the sensor.
    * Or, breathe warm air onto the sensor grill to trigger a delta event (temperature/humidity change) that forces a wake-up broadcast.
-7. **Subsequent Polls**: The integration establishes a dedicated polling window based on the device's reported configuration interval (minimum standard: **1800 seconds / 30 minutes**).
+7. **Subsequent Polls**: The integration establishes a dedicated polling window based on the device's reported configuration interval. The standard firmware interval is **1800 seconds / 30 minutes**. An experimental option allows **600 seconds / 10 minutes** on compatible firmware.
+
+> [!WARNING]
+> The experimental `600s` interval is not guaranteed. In the latest long-run router CSV check for a `Z4tRml` sensor, 58 of 61 post-baseline transitions stayed near 10 minutes, with a best run of 22 consecutive short cycles. Three cycles still fell back to about `1800s` / 30 minutes. Keep the standard `1800s` interval when predictable update timing matters more than faster readings.
+
+#### Restart Behavior
+
+Home Assistant cannot change a sleeping sensor's report interval while the sensor is asleep. After Home Assistant restarts, the integration restores the configured interval from the config entry and begins catch polling, but the value is only pushed to the device when the sensor next wakes.
+
+For the standard `1800s` interval, this usually means the first post-restart update may take up to about 30 minutes unless you wake the sensor manually. For the experimental `600s` interval, the same rule applies: Home Assistant will reinforce the shorter value when the sensor wakes, but the sensor firmware can still occasionally report or revert to `1800s`.
+
+#### Blocking WAN for Experimental Short Intervals
+
+If you are testing the experimental `600s` interval, you can optionally block the sensor's WAN/internet access at the router while keeping local LAN access to Home Assistant open. This reduces external variables while testing, but firmware behavior can still cause a fallback to `1800s`.
+
+Use this network shape:
+
+```text
+Home Assistant <---- LAN allowed ----> CozyLife sensor
+CozyLife sensor ---- WAN blocked ----> Internet / vendor cloud
+```
+
+Before adding any block rule:
+
+1. Create a DHCP reservation for the sensor so its IP address does not change.
+2. Confirm Home Assistant and the sensor are on the same LAN, or on routed VLANs that can reach each other.
+3. Allow TCP/UDP port `5555` between Home Assistant and the sensor.
+4. Block only forwarding from the sensor IP to WAN/internet.
+5. Do not enable AP/client isolation or put the sensor on an isolated guest network.
+
+WAN blocking does not guarantee that short intervals will persist. Some firmware may still report or revert to `1800s` even when internet access is blocked.
+
+OpenWrt / iStoreOS UCI example:
+
+```sh
+uci add firewall rule
+uci set firewall.@rule[-1].name='Block-CozyLife-sensor-WAN'
+uci set firewall.@rule[-1].src='lan'
+uci set firewall.@rule[-1].dest='wan'
+uci set firewall.@rule[-1].src_ip='192.168.3.124'
+uci set firewall.@rule[-1].proto='all'
+uci set firewall.@rule[-1].target='REJECT'
+uci commit firewall
+/etc/init.d/firewall reload
+```
+
+MikroTik RouterOS example:
+
+```routeros
+/ip firewall filter add chain=forward src-address=192.168.3.124 out-interface-list=WAN action=drop comment="Block CozyLife sensor WAN"
+```
+
+For TP-Link, ASUS, UniFi, pfSense/OPNsense, Eero, Deco, Google/Nest WiFi, and ISP routers, use the router's client-specific internet block, parental control, traffic rule, or firewall rule feature. The important requirement is to block only internet access for the sensor, not local traffic between Home Assistant and the sensor.
 
 ---
 
@@ -172,8 +226,6 @@ If you have completed setup but your devices keep dropping off or showing as `Un
 *   **IGMP Snooping / Multicast**: CozyLife uses UDP multicast broadcasts for auto-discovery. Ensure IGMP Snooping is enabled on your router and network switches to allow local multicast packets to traverse from Wi-Fi to Ethernet seamlessly.
 *   **Port 5555**: The CozyLife protocol uses UDP/TCP port `5555`. Ensure that no internal firewalls or parent router rules are blocking traffic on this port between your Home Assistant IP and the device IP range.
 *   **IP Ping Test**: If a device is unavailable, open a Terminal/SSH in Home Assistant and run `ping <device_ip>`. If you get no response, the device has either lost power, changed IP address, or is disconnected from the Wi-Fi.
-
----
 
 ## 6. Analyzing Discovery Logs & Submitting New Models
 

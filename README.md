@@ -46,6 +46,7 @@ While it has been thoroughly verified and confirmed to work with multi-gang wall
 *   ⚡ **100% Local Control**: Zero reliance on the CozyLife cloud. All control commands and sensor polling happen locally over your Wi-Fi network, ensuring maximum security, privacy, and ultra-low latency.
 *   🔌 **Auto-Discovery Scanner**: Instantly scans your local IPv4 subnet (supports customizable CIDR, e.g. `192.168.1.0/24`) and displays the number of active CozyLife devices on the network.
 *   📍 **Static IP & Sleep Sensor Modes**: Easily provision devices individually via single static IP addresses. Includes a specialized "Sleeping temp/humidity sensor" mode that leverages cached metadata to safely pre-build battery-powered entities before the hardware wakes.
+*   🧭 **Visible Device IP Diagnostics**: Exposes each configured device's local IP address as a diagnostic sensor in Home Assistant, making router checks and troubleshooting easier.
 *   🎛️ **Multi-Gang Switch Bitmasks**: Native, low-level bitmask control on DPID 1 ensures multi-gang rockers (e.g., double or triple rocker switches) act as individual, responsive entities.
 *   📈 **Smart Energy Metering**: Auto-detects power-monitoring smart plug chips to expose voltage, current, active power, and cumulative energy sensors (compatible with the HA Energy Dashboard).
 *   💡 **State & Color-Mode Safeguards**: Smooth transitions and automatic work-mode state preservation prevents smart lights from glitching or flashing dark blue during custom RGB commands.
@@ -87,6 +88,15 @@ Once HACS has completed installation and Home Assistant has restarted:
    * **Sleeping Environment Sensor**: If manual provisioning is for a battery-powered sensor, check the "Sleeping temp/humidity sensor" box to avoid handshake timeouts.
    * **Skip Validation**: Check this option to add remote or offline devices immediately (Developer Mode).
 
+### Sleeping Environment Sensor Intervals
+
+Battery-powered environment sensors spend most of their time asleep. The standard report interval is `1800s` / 30 minutes. For compatible firmware, the sleeping-sensor setup and options flow also provides an experimental short-interval mode that allows `600s` / 10-minute updates.
+
+> [!WARNING]
+> The `600s` interval is experimental. In the latest long-run router CSV check for a `Z4tRml` temperature/humidity sensor, 58 of 61 post-baseline transitions stayed near 10 minutes, with a best run of 22 consecutive short cycles. Three cycles still fell back to about 30 minutes. Use `1800s` when a predictable firmware-supported interval matters more than faster updates.
+
+Home Assistant preserves the last valid temperature and humidity readings when a sleeping sensor returns placeholder values during a short wake window. See the [Sleeping Battery-Powered Sensors](docs/SETUP_GUIDE.md#sleeping-battery-powered-sensors-temphumidity) section for setup details and optional router isolation guidance.
+
 ---
 
 ## CozyLife Data Point IDs (DPIDs)
@@ -106,7 +116,7 @@ CozyLife devices report their functionalities via standard Data Point IDs (DPIDs
 | `9` | Battery Level | Exposes remaining battery charge on supported portable sensors. |
 | `10` | Moisture Status | Water-leak detection and alarm sensor. |
 | `11` | Smoke Detection | Smoke alarm status and alarm sensor. |
-| `14` | Report Interval | Sleep interval timer for battery-operated sensors (default 1800s). |
+| `14` | Report Interval | Sleep interval timer for battery-operated sensors (standard `1800s`; experimental `600s` on compatible firmware). |
 | `24` | Humidity Sensitivity | Delta threshold to trigger updates on environmental sensor arrays. |
 | `25` | Temp Sensitivity | Delta threshold to trigger updates on environmental sensor arrays. |
 | `26` | Cumulative Energy (kWh)| Exposes total energy consumption, fully compatible with HA Energy Dashboard. |

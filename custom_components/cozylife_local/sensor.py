@@ -49,7 +49,7 @@ async def async_setup_entry(
     if not coordinator.device.dpid:
         return
 
-    entities = []
+    entities = [CozyLifeIPAddressSensor(coordinator)]
     dpids = coordinator.device.dpid
 
     if coordinator.classification.is_environment_sensor:
@@ -137,6 +137,40 @@ class PlugSensorDescription:
         self.scale = scale
 
 
+def _device_info(coordinator: CozyLifeCoordinator) -> DeviceInfo:
+    """Return shared Home Assistant device info for CozyLife entities."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, coordinator.device.device_id)},
+        name=coordinator.device.device_model_name,
+        manufacturer="CozyLife",
+        model=coordinator.device.pid,
+    )
+
+
+class CozyLifeIPAddressSensor(CoordinatorEntity[CozyLifeCoordinator], SensorEntity):
+    """Diagnostic sensor exposing the device IP address."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:ip-network"
+
+    def __init__(self, coordinator: CozyLifeCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_name = f"{coordinator.device.device_model_name} IP Address"
+        self._attr_unique_id = f"{coordinator.device.device_id}_ip_address"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return _device_info(self.coordinator)
+
+    @property
+    def native_value(self) -> str:
+        return self.coordinator.device.ip_address
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()
+
+
 class CozyLifeSensorBase(
     CoordinatorEntity[CozyLifeCoordinator],
     SensorEntity,
@@ -152,12 +186,7 @@ class CozyLifeSensorBase(
 
     @property
     def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.device.device_id)},
-            name=self.coordinator.device.device_model_name,
-            manufacturer="CozyLife",
-            model=self.coordinator.device.pid,
-        )
+        return _device_info(self.coordinator)
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -268,12 +297,7 @@ class CozyLifePlugSensor(CoordinatorEntity[CozyLifeCoordinator], SensorEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.device.device_id)},
-            name=self.coordinator.device.device_model_name,
-            manufacturer="CozyLife",
-            model=self.coordinator.device.pid,
-        )
+        return _device_info(self.coordinator)
 
     @property
     def native_value(self) -> Optional[float]:
