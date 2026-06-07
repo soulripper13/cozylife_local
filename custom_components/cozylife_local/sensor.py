@@ -38,12 +38,6 @@ from .discovery import get_model_info
 
 _LOGGER = logging.getLogger(__name__)
 
-VOLTAGE_SCALE_BY_PID = {
-    "2MWESf": 1,
-}
-POWER_SCALE_BY_PID = {
-    "2MWESf": 1,
-}
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -96,7 +90,6 @@ async def async_setup_entry(
                 device_class=SensorDeviceClass.POWER,
                 state_class=SensorStateClass.MEASUREMENT,
                 native_unit_of_measurement=UnitOfPower.WATT,
-                scale=POWER_SCALE_BY_PID.get(coordinator.device.pid, 10),
             ),
             PlugSensorDescription(
                 dpid=PLUG_VOLTAGE,
@@ -105,7 +98,6 @@ async def async_setup_entry(
                 device_class=SensorDeviceClass.VOLTAGE,
                 state_class=SensorStateClass.MEASUREMENT,
                 native_unit_of_measurement=UnitOfElectricPotential.VOLT,
-                scale=VOLTAGE_SCALE_BY_PID.get(coordinator.device.pid, 10),
             ),
         ]
         entities.extend(
