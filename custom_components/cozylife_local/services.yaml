@@ -36,3 +36,77 @@ set_effect:
             - 'warm'
             - 'study'
             - 'chrismas'
+set_plug_schedule:
+  name: Set plug schedule
+  description: Schedule a CozyLife metering plug to turn on or off.
+  target:
+    entity:
+      integration: cozylife_local
+      domain: switch
+  fields:
+    schedule_id:
+      name: Schedule ID
+      description: A stable name for this schedule.
+      default: default
+      selector:
+        text:
+    time:
+      name: Time
+      description: Local time when the schedule should run.
+      required: true
+      selector:
+        time:
+    action:
+      name: Action
+      description: Whether the plug should turn on or off.
+      required: true
+      selector:
+        select:
+          options:
+            - turn_on
+            - turn_off
+    repeat:
+      name: Repeat
+      description: Days when the schedule should repeat. Leave empty for one time.
+      selector:
+        select:
+          multiple: true
+          options:
+            - mon
+            - tue
+            - wed
+            - thu
+            - fri
+            - sat
+            - sun
+    enabled:
+      name: Enabled
+      description: Whether the schedule should run.
+      default: true
+      selector:
+        boolean:
+    sync_to_device:
+      name: Sync to device
+      description: Also write the confirmed one-time turn-off timer to the plug.
+      default: true
+      selector:
+        boolean:
+clear_plug_schedule:
+  name: Clear plug schedule
+  description: Clear one or more CozyLife metering plug schedules.
+  target:
+    entity:
+      integration: cozylife_local
+      domain: switch
+  fields:
+    schedule_id:
+      name: Schedule ID
+      description: The schedule ID to clear. Leave empty to clear all schedules for this plug.
+      selector:
+        text:
+    clear_device:
+      name: Clear device timer
+      description: Also clear the plug's native one-time timer payload.
+      default: true
+      selector:
+        boolean:

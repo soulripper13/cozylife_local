@@ -14,6 +14,7 @@ COZYLIFE_PORT = 5555
 CMD_INFO = 0
 CMD_QUERY = 2
 CMD_SET = 3
+DPID_QUERY_ATTEMPTS = 3
 
 def _get_sn() -> str:
     """Generates a unique sequence number based on current timestamp."""
@@ -156,7 +157,10 @@ class CozyLifeDevice:
                 'msg': {'attr': [int(k) for k in payload.keys()], 'data': payload}
             }
         elif cmd == CMD_QUERY:
-            return {'pv': 0, 'cmd': cmd, 'sn': sn, 'msg': {'attr': [0]}}
+            return {
+                'pv': 0, 'cmd': cmd, 'sn': sn,
+                'msg': {'attr': payload.get('attr', [0])}
+            }
         elif cmd == CMD_INFO:
             return {'pv': 0, 'cmd': cmd, 'sn': sn, 'msg': {}}
         else:
@@ -183,15 +187,33 @@ class CozyLifeDevice:
             model_info.model_name if model_info else f"CozyLife Device ({self._pid})"
         )
 
-        # Step 2: Get the full list of supported DPIDs
-        query_msg = await self._send_receive(CMD_QUERY, {})
-        if not query_msg or 'attr' not in query_msg:
+        # Step 2: Get the full list of supported DPIDs. Some metered plugs can
+        # drop the first query during setup, so retry before falling back.
+        query_msg = None
+        for attempt in range(1, DPID_QUERY_ATTEMPTS + 1):
+            query_msg = await self._send_receive(CMD_QUERY, {})
+            if query_msg and ('attr' in query_msg or 'data' in query_msg):
+                break
+            _LOGGER.debug(
+                "DPID query attempt %s/%s failed for %s: %s",
+                attempt,
+                DPID_QUERY_ATTEMPTS,
+                self._ip_address,
+                query_msg,
+            )
+
+        if not query_msg:
             _LOGGER.warning(f"Failed to query DPID list from device: {query_msg}")
             # We can still proceed with a minimal setup if this fails
             self._dpid = []
             return True # Return true as we have the basic info
 
-        self._dpid = [str(dpid) for dpid in query_msg['attr']]
+        if 'attr' in query_msg:
+            self._dpid = [str(dpid) for dpid in query_msg['attr']]
+        elif 'data' in query_msg:
+            self._dpid = [str(dpid) for dpid in query_msg['data']]
+        else:
+            self._dpid = []
 
         _LOGGER.info(
             f"Successfully discovered device {self._ip_address} locally: "
@@ -199,9 +221,13 @@ class CozyLifeDevice:
         )
         return True
 
-    async def async_get_state(self) -> Optional[Dict[str, Any]]:
+    async def async_get_state(self, dpids: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
         """Queries the current state of the device."""
-        msg = await self._send_receive(CMD_QUERY, {})
+        payload = {}
+        if dpids:
+            payload["attr"] = [int(dpid) for dpid in dpids]
+
+        msg = await self._send_receive(CMD_QUERY, payload)
         if msg and 'data' in msg:
             return {str(k): v for k, v in msg['data'].items()}
         return None

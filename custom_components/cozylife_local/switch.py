@@ -3,12 +3,18 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, PLUG_OVERCURRENT_PROTECTION
 from .coordinator import CozyLifeCoordinator
+from .schedule import (
+    DEFAULT_SCHEDULE_ID,
+    SCHEDULE_MANAGER,
+    CozyLifeScheduleManager,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,6 +60,14 @@ async def async_setup_entry(
         )
         for gang_bit in range(entity_count)
     ]
+
+    if coordinator.device.pid == "2MWESf":
+        entities.extend(
+            [
+                CozyLifePlugBooleanSwitch(coordinator),
+                CozyLifePlugScheduleEnabledSwitch(coordinator),
+            ]
+        )
 
     if entities:
         async_add_entities(entities)
@@ -143,6 +157,133 @@ class CozyLifeSwitch(CoordinatorEntity[CozyLifeCoordinator], SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn this specific switch gang off."""
         await self._async_set_gang_state(False)
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        self.async_write_ha_state()
+
+
+class CozyLifePlugScheduleSwitchBase(SwitchEntity):
+    """Base class for Home Assistant backed schedule switches."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(
+        self,
+        coordinator: CozyLifeCoordinator,
+        schedule_id: str = DEFAULT_SCHEDULE_ID,
+    ) -> None:
+        self.coordinator = coordinator
+        self._schedule_id = schedule_id
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.coordinator.device.device_id)},
+            name=self.coordinator.device.device_model_name,
+            manufacturer="CozyLife",
+            model=self.coordinator.device.pid,
+        )
+
+    @property
+    def _manager(self) -> CozyLifeScheduleManager:
+        return self.coordinator.hass.data[DOMAIN][SCHEDULE_MANAGER]
+
+
+class CozyLifePlugScheduleEnabledSwitch(CozyLifePlugScheduleSwitchBase):
+    """Enable the default plug schedule."""
+
+    _attr_icon = "mdi:calendar-check"
+
+    def __init__(
+        self,
+        coordinator: CozyLifeCoordinator,
+        schedule_id: str = DEFAULT_SCHEDULE_ID,
+    ) -> None:
+        super().__init__(coordinator, schedule_id)
+        self._attr_name = f"{coordinator.device.device_model_name} Schedule Enabled"
+        self._attr_unique_id = f"{coordinator.device.device_id}_schedule_enabled"
+
+    @property
+    def is_on(self) -> bool:
+        schedule = self._manager.schedule_for_coordinator(
+            self.coordinator,
+            self._schedule_id,
+        )
+        return bool(schedule.get("enabled", False))
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._manager.async_update_coordinator_schedule(
+            self.coordinator,
+            self._schedule_id,
+            enabled=True,
+        )
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._manager.async_update_coordinator_schedule(
+            self.coordinator,
+            self._schedule_id,
+            enabled=False,
+            sync_to_device=False,
+        )
+        self.async_write_ha_state()
+
+
+class CozyLifePlugBooleanSwitch(
+    CoordinatorEntity[CozyLifeCoordinator],
+    SwitchEntity,
+):
+    """Writable boolean option for the metering socket."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: CozyLifeCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_name = f"{coordinator.device.device_model_name} Overcurrent Protection"
+        self._attr_unique_id = (
+            f"{coordinator.device.device_id}_overcurrent_protection"
+        )
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return the device info for the parent device."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.coordinator.device.device_id)},
+            name=self.coordinator.device.device_model_name,
+            manufacturer="CozyLife",
+            model=self.coordinator.device.pid,
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return whether overcurrent protection is enabled."""
+        raw = self.coordinator.data.get(PLUG_OVERCURRENT_PROTECTION)
+        if raw is None:
+            return None
+        return bool(raw)
+
+    async def _async_set_state(self, enabled: bool) -> None:
+        value = 1 if enabled else 0
+        if await self.coordinator.device.async_set_state(
+            {PLUG_OVERCURRENT_PROTECTION: value}
+        ):
+            self.coordinator.data[PLUG_OVERCURRENT_PROTECTION] = value
+            self.async_write_ha_state()
+        else:
+            _LOGGER.warning(
+                "Failed to set overcurrent protection for CozyLife device %s",
+                self.coordinator.device.ip_address,
+            )
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable overcurrent protection."""
+        await self._async_set_state(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable overcurrent protection."""
+        await self._async_set_state(False)
 
     @callback
     def _handle_coordinator_update(self) -> None:

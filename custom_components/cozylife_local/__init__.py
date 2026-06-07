@@ -8,6 +8,7 @@ from .const import DOMAIN, PLATFORMS
 from .cozylife_api import CozyLifeDevice
 from .coordinator import CozyLifeCoordinator
 from .discovery import async_load_model_catalog
+from .schedule import SCHEDULE_MANAGER, async_setup_schedule_services
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})
     await async_load_model_catalog(hass)
+    await async_setup_schedule_services(hass)
 
     ip_address = entry.data["ip_address"]
 
@@ -87,5 +89,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
+        active_entries = [
+            key for key in hass.data[DOMAIN] if key != SCHEDULE_MANAGER
+        ]
+        if not active_entries:
+            manager = hass.data[DOMAIN].pop(SCHEDULE_MANAGER, None)
+            if manager is not None:
+                await manager.async_unload()
 
     return unload_ok

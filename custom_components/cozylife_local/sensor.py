@@ -31,11 +31,31 @@ from .const import (
     PLUG_ENERGY,
     PLUG_CURRENT,
     PLUG_POWER,
+    PLUG_TIMER_SCHEDULE,
+    PLUG_TIMER_STATUS,
     PLUG_VOLTAGE,
 )
 from .coordinator import CozyLifeCoordinator
+from .discovery import get_model_info
 
 _LOGGER = logging.getLogger(__name__)
+
+VOLTAGE_SCALE_BY_PID = {
+    "2MWESf": 1,
+}
+POWER_SCALE_BY_PID = {
+    "2MWESf": 1,
+}
+EMPTY_TIMER_SCHEDULE = "0" * 50
+TIMER_SCHEDULE_PREFIX = {
+    "00": "Executed or inactive",
+    "10": "Scheduled",
+}
+TIMER_STATUS_VALUES = {
+    3: "App timer or schedule",
+    4: "Countdown expired",
+    5: "Manual off",
+}
 
 
 async def async_setup_entry(
@@ -50,7 +70,10 @@ async def async_setup_entry(
         return
 
     entities = [CozyLifeIPAddressSensor(coordinator)]
-    dpids = coordinator.device.dpid
+    dpids = set(coordinator.device.dpid)
+    model_info = get_model_info(coordinator.device.pid)
+    if model_info:
+        dpids.update(model_info.dpids)
 
     if coordinator.classification.is_environment_sensor:
         entities.extend(
@@ -87,7 +110,7 @@ async def async_setup_entry(
                 device_class=SensorDeviceClass.POWER,
                 state_class=SensorStateClass.MEASUREMENT,
                 native_unit_of_measurement=UnitOfPower.WATT,
-                scale=10,
+                scale=POWER_SCALE_BY_PID.get(coordinator.device.pid, 10),
             ),
             PlugSensorDescription(
                 dpid=PLUG_VOLTAGE,
@@ -96,13 +119,45 @@ async def async_setup_entry(
                 device_class=SensorDeviceClass.VOLTAGE,
                 state_class=SensorStateClass.MEASUREMENT,
                 native_unit_of_measurement=UnitOfElectricPotential.VOLT,
-                scale=10,
+                scale=VOLTAGE_SCALE_BY_PID.get(coordinator.device.pid, 10),
+            ),
+        ]
+        diagnostic_sensor_descriptions = [
+            PlugSensorDescription(
+                dpid="42",
+                key="dpid_42",
+                name="Period Energy",
+                device_class=SensorDeviceClass.ENERGY,
+                state_class=SensorStateClass.TOTAL_INCREASING,
+                native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+                scale=1000,
+                entity_category=EntityCategory.DIAGNOSTIC,
+            ),
+            PlugSensorDescription(
+                dpid=PLUG_TIMER_SCHEDULE,
+                key="timer_schedule",
+                name="Timer Schedule",
+                device_class=None,
+                state_class=None,
+                native_unit_of_measurement=None,
+                entity_category=EntityCategory.DIAGNOSTIC,
+            ),
+            PlugSensorDescription(
+                dpid=PLUG_TIMER_STATUS,
+                key="dpid_72",
+                name="Last Off Reason",
+                device_class=None,
+                state_class=None,
+                native_unit_of_measurement=None,
+                entity_category=EntityCategory.DIAGNOSTIC,
             ),
         ]
 
         entities.extend(
-            CozyLifePlugSensor(coordinator, description)
-            for description in plug_sensor_descriptions
+            _create_plug_sensor(coordinator, description)
+            for description in (
+                plug_sensor_descriptions + diagnostic_sensor_descriptions
+            )
             if description.dpid in dpids
         )
 
@@ -123,10 +178,11 @@ class PlugSensorDescription:
         dpid: str,
         key: str,
         name: str,
-        device_class: SensorDeviceClass,
-        state_class: SensorStateClass,
-        native_unit_of_measurement: str,
+        device_class: SensorDeviceClass | None,
+        state_class: SensorStateClass | None,
+        native_unit_of_measurement: str | None,
         scale: int = 1,
+        entity_category: EntityCategory | None = None,
     ) -> None:
         self.dpid = dpid
         self.key = key
@@ -135,6 +191,19 @@ class PlugSensorDescription:
         self.state_class = state_class
         self.native_unit_of_measurement = native_unit_of_measurement
         self.scale = scale
+        self.entity_category = entity_category
+
+
+def _create_plug_sensor(
+    coordinator: CozyLifeCoordinator,
+    description: PlugSensorDescription,
+) -> SensorEntity:
+    """Create the right entity class for a smart plug sensor description."""
+    if description.dpid == PLUG_TIMER_SCHEDULE:
+        return CozyLifeTimerScheduleSensor(coordinator, description)
+    if description.dpid == PLUG_TIMER_STATUS:
+        return CozyLifeLastOffReasonSensor(coordinator, description)
+    return CozyLifePlugSensor(coordinator, description)
 
 
 def _device_info(coordinator: CozyLifeCoordinator) -> DeviceInfo:
@@ -294,6 +363,7 @@ class CozyLifePlugSensor(CoordinatorEntity[CozyLifeCoordinator], SensorEntity):
         self._attr_device_class = description.device_class
         self._attr_state_class = description.state_class
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
+        self._attr_entity_category = description.entity_category
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -313,3 +383,59 @@ class CozyLifePlugSensor(CoordinatorEntity[CozyLifeCoordinator], SensorEntity):
     @callback
     def _handle_coordinator_update(self) -> None:
         self.async_write_ha_state()
+
+
+class CozyLifeTimerScheduleSensor(CozyLifePlugSensor):
+    """Diagnostic sensor for the encoded app timer/schedule payload."""
+
+    _attr_icon = "mdi:calendar-clock"
+
+    @property
+    def native_value(self) -> str | None:
+        raw = self.coordinator.data.get(self._description.dpid)
+        if raw is None:
+            return None
+
+        payload = str(raw)
+        if payload == EMPTY_TIMER_SCHEDULE:
+            return "None"
+
+        return TIMER_SCHEDULE_PREFIX.get(payload[:2], "Configured")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str] | None:
+        raw = self.coordinator.data.get(self._description.dpid)
+        if raw is None:
+            return None
+
+        return {"raw_payload": str(raw)}
+
+
+class CozyLifeLastOffReasonSensor(CozyLifePlugSensor):
+    """Diagnostic sensor for the latest plug off reason/status code."""
+
+    _attr_icon = "mdi:power-plug-off"
+
+    @property
+    def native_value(self) -> str | None:
+        raw = self.coordinator.data.get(self._description.dpid)
+        if raw is None:
+            return None
+
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return str(raw)
+
+        return TIMER_STATUS_VALUES.get(value, f"Unknown ({value})")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, int] | None:
+        raw = self.coordinator.data.get(self._description.dpid)
+        if raw is None:
+            return None
+
+        try:
+            return {"raw_value": int(raw)}
+        except (TypeError, ValueError):
+            return None

@@ -14,6 +14,13 @@ from .cozylife_api import CozyLifeDevice
 from .const import (
     DEFAULT_SENSOR_REPORT_INTERVAL,
     MIN_SENSOR_REPORT_INTERVAL,
+    PLUG_CURRENT,
+    PLUG_LED_STATUS,
+    PLUG_OVERCURRENT_PROTECTION,
+    PLUG_POWER_ON_STATE,
+    PLUG_TIMER_SCHEDULE,
+    PLUG_TIMER_STATUS,
+    PLUG_VOLTAGE,
     SENSOR_HUMIDITY,
     SENSOR_HUMIDITY_SENSITIVITY_DPID,
     SENSOR_TEMPERATURE,
@@ -21,7 +28,7 @@ from .const import (
     SENSOR_TEMP_SENSITIVITY_DPID,
     STANDARD_SENSOR_REPORT_INTERVAL,
 )
-from .discovery import classify_device
+from .discovery import classify_device, get_model_info
 
 _LOGGER = logging.getLogger(__name__)
 _UPDATE_LOGGER = logging.getLogger(f"{__name__}.updates")
@@ -41,6 +48,15 @@ ENVIRONMENT_SENSOR_MEASUREMENTS = {
     SENSOR_HUMIDITY: "humidity",
 }
 EXPERIMENTAL_SHORT_INTERVAL_KEY = "experimental_short_interval"
+EXTRA_PLUG_DPIDS = (
+    PLUG_TIMER_SCHEDULE,
+    PLUG_POWER_ON_STATE,
+    PLUG_OVERCURRENT_PROTECTION,
+    PLUG_LED_STATUS,
+    PLUG_CURRENT,
+    PLUG_TIMER_STATUS,
+    PLUG_VOLTAGE,
+)
 
 
 def _next_sensor_wake_delay(report_interval: int) -> int:
@@ -353,6 +369,38 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         )
         return best_state
 
+    async def _async_add_hidden_plug_state(
+        self,
+        state_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Merge plug DPIDs that are supported but omitted from default state."""
+        if not self.classification.supports_plug_metering:
+            return state_data
+
+        model_info = get_model_info(self.device.pid)
+        known_dpids = set(self.device.dpid or [])
+        if model_info:
+            known_dpids.update(model_info.dpids)
+
+        missing_dpids = [
+            dpid
+            for dpid in EXTRA_PLUG_DPIDS
+            if dpid in known_dpids and dpid not in state_data
+        ]
+        if not missing_dpids:
+            return state_data
+
+        hidden_state = await self.device.async_get_state(missing_dpids)
+        if hidden_state is None:
+            _LOGGER.debug(
+                "[COZYLIFE] Failed to query hidden plug DPIDs %s from %s",
+                missing_dpids,
+                self.device.ip_address,
+            )
+            return state_data
+
+        return {**state_data, **hidden_state}
+
     async def _async_confirm_report_interval(self, state_data: Dict[str, Any]) -> Dict[str, Any]:
         """Write the report interval and keep it set while the sensor is awake."""
         if self._report_interval_unsupported:
@@ -467,6 +515,7 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                     raise UpdateFailed(f"Failed to get full device info for {self.device.ip_address}")
 
             state_data = await self._async_get_environment_state()
+            state_data = await self._async_add_hidden_plug_state(state_data)
 
             # Push sensitivity settings before report interval reinforcement so
             # DPID 14 can be the final write near the end of the wake window.

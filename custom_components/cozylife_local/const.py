@@ -22,11 +22,17 @@ SENSOR_TYPE_CODE = '03'
 KNOWN_SENSOR_PIDS = {'Z4tRml'}
 
 # Electrician / smart plug DPIDs
+PLUG_COUNTDOWN = '2'        # countdown/timer, seconds
+PLUG_TIMER_SCHEDULE = '3'   # encoded app timer/schedule payload
+PLUG_POWER_ON_STATE = '18'  # relay restore behavior after power loss, enum
+PLUG_LED_STATUS = '19'      # indicator LED behavior, enum
 PLUG_ENERGY = '26'          # add_ele, scale 3, kWh
 PLUG_CURRENT = '27'         # cur_current, mA
 PLUG_POWER = '28'           # cur_power, scale 1, W
 PLUG_VOLTAGE = '29'         # cur_voltage, scale 1, V
 PLUG_FAULT = '30'           # fault enum
+PLUG_OVERCURRENT_PROTECTION = '32'  # overcurrent protection enable flag
+PLUG_TIMER_STATUS = '72'    # last off reason / timer status enum
 
 # Supported device types (derived from old integration, actual support depends on pid_list)
 SWITCH_TYPE_CODE = '00'
@@ -34,7 +40,15 @@ LIGHT_TYPE_CODE = '01'
 RGB_LIGHT_TYPE_CODE = '02'  # Some RGB lights report type code 02
 SUPPORT_DEVICE_CATEGORY = [SWITCH_TYPE_CODE, LIGHT_TYPE_CODE, RGB_LIGHT_TYPE_CODE]
 
-PLATFORMS = ["light", "switch", "sensor", "binary_sensor"]
+PLATFORMS = [
+    "light",
+    "switch",
+    "sensor",
+    "binary_sensor",
+    "number",
+    "select",
+    "time",
+]
 
 DEFAULT_MIN_KELVIN = 2000
 DEFAULT_MAX_KELVIN = 6500

@@ -36,6 +36,17 @@ _MODEL_PATH = Path(__file__).with_name("model.json")
 _METERING_DPIDS = {PLUG_ENERGY, PLUG_CURRENT, PLUG_POWER, PLUG_VOLTAGE}
 _SWITCH_GANG_DPIDS = ("2", "4", "6", "8", "10", "12", "14", "16")
 _OUTLET_NAME_MARKERS = ("plug", "socket", "outlet", "插座", "插板")
+_SWITCH_NAME_MARKERS = (
+    "plug",
+    "socket",
+    "outlet",
+    "switch",
+    "gang",
+    "way",
+    "插座",
+    "插板",
+    "开关",
+)
 _GENERIC_POWER_TYPE_CODES = {"05", "19"}
 _GENERIC_POWER_EXCLUDED_NAMES = ("doorbell", "detection", "tire pressure", "门铃")
 _NAMED_GANG_COUNTS = {
@@ -148,11 +159,23 @@ def _is_outlet_name(name: str | None) -> bool:
     return any(marker in lower_name for marker in _OUTLET_NAME_MARKERS)
 
 
+def _is_switch_name(name: str | None) -> bool:
+    if not name:
+        return False
+    lower_name = name.lower()
+    return any(marker in lower_name for marker in _SWITCH_NAME_MARKERS)
+
+
 def _is_generic_power_device(model_info: ModelInfo | None) -> bool:
     if not model_info or model_info.type_code not in _GENERIC_POWER_TYPE_CODES:
         return False
     lower_name = (model_info.model_name or "").lower()
-    return not any(marker in lower_name for marker in _GENERIC_POWER_EXCLUDED_NAMES)
+    if any(marker in lower_name for marker in _GENERIC_POWER_EXCLUDED_NAMES):
+        return False
+
+    return _is_switch_name(model_info.model_name) or bool(
+        _METERING_DPIDS & model_info.dpids
+    )
 
 
 def _count_from_model_name(name: str | None) -> int | None:
@@ -224,14 +247,23 @@ def classify_device(
     is_sensor_category = bool(model_info and model_info.type_name.lower() == "sensor")
     is_outlet = bool(model_info and _is_outlet_name(model_info.model_name))
     is_generic_power_device = _is_generic_power_device(model_info)
+    has_light_capability = (
+        TEMP in dpid_set
+        or BRIGHT in dpid_set
+        or (HUE in dpid_set and SAT in dpid_set)
+    )
 
     # Legacy compatibility: some existing RGB lights report type 02. Only use
-    # that fallback when the bundled catalog does not identify the PID as motor.
+    # that fallback when the device also exposes light capability DPIDs.
     is_light = (
         not is_environment_sensor
         and (
             effective_type_code == LIGHT_TYPE_CODE
-            or (not model_info and device_type_code == RGB_LIGHT_TYPE_CODE)
+            or (
+                not model_info
+                and device_type_code == RGB_LIGHT_TYPE_CODE
+                and has_light_capability
+            )
         )
     )
 
@@ -240,17 +272,12 @@ def classify_device(
         and effective_type_code == SWITCH_TYPE_CODE
     )
 
-    has_light_capability = (
-        TEMP in dpid_set
-        or BRIGHT in dpid_set
-        or (HUE in dpid_set and SAT in dpid_set)
-    )
     supports_switch_entities = (
         not is_environment_sensor
         and SWITCH in dpid_set
         and not is_known_motor
         and not (is_light and has_light_capability)
-        and (is_switch or is_generic_power_device or model_info is None)
+        and (is_switch or is_generic_power_device)
     )
     switch_entity_count = 1 if (
         is_generic_power_device and supports_switch_entities
