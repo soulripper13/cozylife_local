@@ -118,6 +118,13 @@ Multi-gang devices (such as double or triple rocker wall switches) share a singl
 *   **Bitmask Control**: CozyLife controls multi-gang channels via a bitmask on Data Point ID 1 (`DPID 1`).
 *   **Auto-Detection**: The integration automatically reads the device's capability maps and count attributes. It determines if it has 1, 2, 3, or more switch gangs.
 *   **Individual Entities**: Home Assistant will create a distinct switch entity for each gang (e.g., `Switch 1`, `Switch 2`). You can rename these individually in the Home Assistant UI without losing local link stability.
+*   **Switch Options**: Some wall switches advertise hidden option DPIDs in the
+    bundled catalog even when the default device response omits them. When
+    available, the integration exposes Power-on State (`DPID 18`), LED Status
+    (`DPID 19`), and Home Assistant-backed schedule controls.
+*   **Schedules**: Wall-switch schedules are executed by Home Assistant against
+    the selected switch entity. Metered plugs that support `DPID 3` can also
+    sync a decoded one-shot turn-off timer to the device itself.
 
 ---
 

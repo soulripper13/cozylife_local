@@ -48,11 +48,13 @@ ENVIRONMENT_SENSOR_MEASUREMENTS = {
     SENSOR_HUMIDITY: "humidity",
 }
 EXPERIMENTAL_SHORT_INTERVAL_KEY = "experimental_short_interval"
-EXTRA_PLUG_DPIDS = (
+EXTRA_SWITCH_OPTION_DPIDS = (
     PLUG_TIMER_SCHEDULE,
     PLUG_POWER_ON_STATE,
     PLUG_OVERCURRENT_PROTECTION,
     PLUG_LED_STATUS,
+)
+EXTRA_PLUG_METERING_DPIDS = (
     PLUG_CURRENT,
     PLUG_TIMER_STATUS,
     PLUG_VOLTAGE,
@@ -89,8 +91,8 @@ def _is_valid_environment_measurement(
     if not isinstance(value, (int, float)):
         return False
 
-    # Z4tRml can intermittently report 0 while asleep/waking. Treat that as a
-    # placeholder so Home Assistant does not record false zero spikes.
+    # Sleeping environment sensors can intermittently report 0 while waking.
+    # Treat that as a placeholder so Home Assistant does not record false spikes.
     if zero_is_placeholder and value == 0:
         return False
 
@@ -267,22 +269,20 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
         previous_data = self.data or {}
         sanitized = dict(state_data)
-        zero_is_placeholder = self.device.pid == "Z4tRml"
-
         for dpid, name in ENVIRONMENT_SENSOR_MEASUREMENTS.items():
             current = sanitized.get(dpid)
             previous = previous_data.get(dpid)
             if _is_valid_environment_measurement(
                 dpid,
                 current,
-                zero_is_placeholder=zero_is_placeholder,
+                zero_is_placeholder=True,
             ):
                 continue
 
             if _is_valid_environment_measurement(
                 dpid,
                 previous,
-                zero_is_placeholder=zero_is_placeholder,
+                zero_is_placeholder=True,
             ):
                 sanitized[dpid] = previous
                 _LOGGER.debug(
@@ -309,12 +309,11 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         if not self.classification.is_environment_sensor:
             return True
 
-        zero_is_placeholder = self.device.pid == "Z4tRml"
         return all(
             _is_valid_environment_measurement(
                 dpid,
                 state_data.get(dpid),
-                zero_is_placeholder=zero_is_placeholder,
+                zero_is_placeholder=True,
             )
             for dpid in ENVIRONMENT_SENSOR_MEASUREMENTS
         )
@@ -369,12 +368,12 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         )
         return best_state
 
-    async def _async_add_hidden_plug_state(
+    async def _async_add_hidden_switch_state(
         self,
         state_data: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Merge plug DPIDs that are supported but omitted from default state."""
-        if not self.classification.supports_plug_metering:
+        """Merge switch option DPIDs that are omitted from default state."""
+        if not self.classification.supports_switch_entities:
             return state_data
 
         model_info = get_model_info(self.device.pid)
@@ -382,9 +381,13 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         if model_info:
             known_dpids.update(model_info.dpids)
 
+        candidate_dpids = set(EXTRA_SWITCH_OPTION_DPIDS)
+        if self.classification.supports_plug_metering:
+            candidate_dpids.update(EXTRA_PLUG_METERING_DPIDS)
+
         missing_dpids = [
             dpid
-            for dpid in EXTRA_PLUG_DPIDS
+            for dpid in candidate_dpids
             if dpid in known_dpids and dpid not in state_data
         ]
         if not missing_dpids:
@@ -393,7 +396,7 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         hidden_state = await self.device.async_get_state(missing_dpids)
         if hidden_state is None:
             _LOGGER.debug(
-                "[COZYLIFE] Failed to query hidden plug DPIDs %s from %s",
+                "[COZYLIFE] Failed to query hidden switch DPIDs %s from %s",
                 missing_dpids,
                 self.device.ip_address,
             )
@@ -515,7 +518,7 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                     raise UpdateFailed(f"Failed to get full device info for {self.device.ip_address}")
 
             state_data = await self._async_get_environment_state()
-            state_data = await self._async_add_hidden_plug_state(state_data)
+            state_data = await self._async_add_hidden_switch_state(state_data)
 
             # Push sensitivity settings before report interval reinforcement so
             # DPID 14 can be the final write near the end of the wake window.

@@ -10,26 +10,17 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, PLUG_OVERCURRENT_PROTECTION, PLUG_TIMER_SCHEDULE
 from .coordinator import CozyLifeCoordinator
-from .discovery import get_model_info
 from .schedule import (
     DEFAULT_SCHEDULE_ID,
     SCHEDULE_MANAGER,
     CozyLifeScheduleManager,
 )
+from .switch_options import supported_dpids, supports_schedule_options
 
 _LOGGER = logging.getLogger(__name__)
 
 # The DPID used for controlling all switch/outlet gangs via a bitmask.
 BITMASK_DPID = "1"
-
-
-def _supported_dpids(coordinator: CozyLifeCoordinator) -> set[str]:
-    """Return discovered and catalog-listed DPIDs for this device."""
-    dpids = set(coordinator.device.dpid or [])
-    model_info = get_model_info(coordinator.device.pid)
-    if model_info:
-        dpids.update(model_info.dpids)
-    return dpids
 
 
 async def async_setup_entry(
@@ -72,12 +63,12 @@ async def async_setup_entry(
         for gang_bit in range(entity_count)
     ]
 
+    dpids = supported_dpids(coordinator)
     if coordinator.classification.supports_plug_metering:
-        dpids = _supported_dpids(coordinator)
         if PLUG_OVERCURRENT_PROTECTION in dpids:
             entities.append(CozyLifePlugBooleanSwitch(coordinator))
-        if PLUG_TIMER_SCHEDULE in dpids:
-            entities.append(CozyLifePlugScheduleEnabledSwitch(coordinator))
+    if supports_schedule_options(coordinator):
+        entities.append(CozyLifePlugScheduleEnabledSwitch(coordinator))
 
     if entities:
         async_add_entities(entities)

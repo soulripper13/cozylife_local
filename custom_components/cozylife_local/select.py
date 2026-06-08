@@ -14,7 +14,6 @@ from .const import (
     PLUG_TIMER_SCHEDULE,
 )
 from .coordinator import CozyLifeCoordinator
-from .discovery import get_model_info
 from .schedule import (
     ACTION_TURN_OFF,
     ACTION_TURN_ON,
@@ -23,6 +22,7 @@ from .schedule import (
     WEEKDAYS,
     CozyLifeScheduleManager,
 )
+from .switch_options import supported_dpids, supports_schedule_options
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -57,15 +57,6 @@ SCHEDULE_REPEAT_OPTIONS = {
 }
 
 
-def _supported_dpids(coordinator: CozyLifeCoordinator) -> set[str]:
-    """Return discovered and catalog-listed DPIDs for this device."""
-    dpids = set(coordinator.device.dpid or [])
-    model_info = get_model_info(coordinator.device.pid)
-    if model_info:
-        dpids.update(model_info.dpids)
-    return dpids
-
-
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -74,20 +65,20 @@ async def async_setup_entry(
     """Set up CozyLife select platform."""
     coordinator: CozyLifeCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
-    if not coordinator.device.dpid or not coordinator.classification.supports_plug_metering:
+    if not coordinator.device.dpid or not coordinator.classification.supports_switch_entities:
         _LOGGER.debug(
             "Device %s has no supported select DPIDs, skipping select setup.",
             coordinator.device.ip_address,
         )
         return
 
-    dpids = _supported_dpids(coordinator)
+    dpids = supported_dpids(coordinator)
     entities = []
     if PLUG_POWER_ON_STATE in dpids:
         entities.append(CozyLifePowerOnStateSelect(coordinator))
     if PLUG_LED_STATUS in dpids:
         entities.append(CozyLifeLedStatusSelect(coordinator))
-    if PLUG_TIMER_SCHEDULE in dpids:
+    if supports_schedule_options(coordinator):
         entities.extend(
             [
                 CozyLifePlugScheduleActionSelect(coordinator),

@@ -278,6 +278,7 @@ class CozyLifeScheduleManager:
             and sync_to_device
             and not repeat_days
             and schedule.get("action") == ACTION_TURN_OFF
+            and coordinator.classification.supports_plug_metering
         ):
             await self._async_write_device_schedule(
                 entity_id,
@@ -323,9 +324,9 @@ class CozyLifeScheduleManager:
             raise HomeAssistantError(
                 f"Could not find CozyLife coordinator for {entity_id}"
             )
-        if not coordinator.classification.supports_plug_metering:
+        if not coordinator.classification.supports_switch_entities:
             raise HomeAssistantError(
-                f"{entity_id} does not belong to a metering plug"
+                f"{entity_id} does not belong to a supported CozyLife switch"
             )
 
         return coordinator
@@ -383,7 +384,13 @@ class CozyLifeScheduleManager:
             if not repeat:
                 self._schedules[key]["run_at"] = scheduled_at.isoformat()
 
-            if enabled and sync_to_device and not repeat and action == ACTION_TURN_OFF:
+            if (
+                enabled
+                and sync_to_device
+                and not repeat
+                and action == ACTION_TURN_OFF
+                and coordinator.classification.supports_plug_metering
+            ):
                 await self._async_write_device_schedule(entity_id, schedule_time, action)
 
         await self._async_save()

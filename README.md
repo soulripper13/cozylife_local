@@ -25,11 +25,13 @@
 
 ---
 
-## ⚠️ Beta / Testing Phase
+## Stable Device Support
 
-**This is a new integration and is currently in an active public testing phase.**
+**CozyLife Local is stable for the device families that have been confirmed through local validation and field reports.**
 
-While it has been thoroughly verified and confirmed to work with multi-gang wall switches, dimmable lights, sensors, and power-metered outlets, physical device specifications vary by manufacturer and model layout (DPIDs). We are actively looking for testers to help expand the default catalog for CozyLife devices, including:
+Confirmed support currently includes multi-gang wall switches, dimmable and color-capable lights, sleeping temperature/humidity sensors, standard smart plugs, and power-metered outlets. Physical device specifications still vary by manufacturer and model layout, so unconfirmed CozyLife devices may need catalog or DPID adjustments.
+
+We are still looking for reports to expand coverage for:
 
 *   Single gang wall switches & smart plugs
 *   High-power/power-monitoring smart plugs and outlets
@@ -48,7 +50,8 @@ While it has been thoroughly verified and confirmed to work with multi-gang wall
 *   📍 **Static IP & Sleep Sensor Modes**: Easily provision devices individually via single static IP addresses. Includes a specialized "Sleeping temp/humidity sensor" mode that leverages cached metadata to safely pre-build battery-powered entities before the hardware wakes.
 *   🧭 **Visible Device IP Diagnostics**: Exposes each configured device's local IP address as a diagnostic sensor in Home Assistant, making router checks and troubleshooting easier.
 *   🎛️ **Multi-Gang Switch Bitmasks**: Native, low-level bitmask control on DPID 1 ensures multi-gang rockers (e.g., double or triple rocker switches) act as individual, responsive entities.
-*   📈 **Smart Energy Metering**: Auto-detects power-monitoring smart plug chips to expose voltage, current, active power, and cumulative energy sensors (compatible with the HA Energy Dashboard).
+*   🧩 **Switch Option Controls**: Exposes supported wall-switch Power-on State, LED Status, and Home Assistant-backed schedule controls when the device catalog advertises the required DPIDs.
+*   📈 **Smart Energy Metering**: Auto-detects power-monitoring smart plug chips to expose voltage, current, active power, and cumulative energy sensors (compatible with the HA Energy Dashboard), plus plug options such as countdowns, schedules, LED behavior, power-on restore, and overcurrent protection where supported.
 *   💡 **State & Color-Mode Safeguards**: Smooth transitions and automatic work-mode state preservation prevents smart lights from glitching or flashing dark blue during custom RGB commands.
 *   🛠️ **Developer-Mode Setup**: Features a "Skip validation" config option, allowing advanced users to add remote devices or provision entities without waiting for active handshakes.
 
@@ -93,9 +96,42 @@ Once HACS has completed installation and Home Assistant has restarted:
 Battery-powered environment sensors spend most of their time asleep. The standard report interval is `1800s` / 30 minutes. For compatible firmware, the sleeping-sensor setup and options flow also provides an experimental short-interval mode that allows `600s` / 10-minute updates.
 
 > [!WARNING]
-> The `600s` interval is experimental. In the latest long-run router CSV check for a `Z4tRml` temperature/humidity sensor, 58 of 61 post-baseline transitions stayed near 10 minutes, with a best run of 22 consecutive short cycles. Three cycles still fell back to about 30 minutes. Use `1800s` when a predictable firmware-supported interval matters more than faster updates.
+> The `600s` interval is experimental. Long-run checks have shown mostly 10-minute wake cycles on compatible firmware, but some cycles can still fall back to about 30 minutes. Use `1800s` when a predictable firmware-supported interval matters more than faster updates.
 
 Home Assistant preserves the last valid temperature and humidity readings when a sleeping sensor returns placeholder values during a short wake window. See the [Sleeping Battery-Powered Sensors](docs/SETUP_GUIDE.md#sleeping-battery-powered-sensors-temphumidity) section for setup details and optional router isolation guidance.
+
+---
+
+## Switches and Metered Plugs
+
+### Wall Switches
+
+Multi-gang wall switches use `DPID 1` as a bitmask. Home Assistant exposes each gang as its own switch entity while preserving one local device connection.
+
+Some wall switches also advertise hidden option DPIDs in the bundled catalog. When available, CozyLife Local exposes:
+
+*   **Power-on State** (`DPID 18`)
+*   **LED Status** (`DPID 19`)
+*   **Schedule controls** (`DPID 3`) backed by Home Assistant
+
+Wall-switch schedules are executed by Home Assistant against the selected switch entity. They do not rely on the same native one-shot timer payload used by metered plugs.
+
+### Metered Smart Plugs
+
+Metered plugs expose outlet control plus electricity sensors:
+
+*   **Energy** (`DPID 26`) as kWh using `/1000`
+*   **Current** (`DPID 27`) as raw mA
+*   **Power** (`DPID 28`) as raw W
+*   **Voltage** (`DPID 29`) as raw V
+
+Compatible plugs can also expose:
+
+*   **Countdown** (`DPID 2`)
+*   **One-shot schedule controls** (`DPID 3`) with native device sync for decoded turn-off timers
+*   **Power-on State** (`DPID 18`)
+*   **LED Status** (`DPID 19`)
+*   **Overcurrent Protection** (`DPID 32`)
 
 ---
 
@@ -107,7 +143,7 @@ CozyLife devices report their functionalities via standard Data Point IDs (DPIDs
 |------|-----------------|-------------|
 | `1` | Power / Switch Bitmask | Master light power, plug power, or multi-gang rocker state bitmask. |
 | `2` | Work Mode / Countdown | Light profile settings on bulbs; gang-1 timer/countdown on switches. |
-| `3` | Color Temperature | White light warmth control, scaled dynamically to custom Kelvin ranges. |
+| `3` | Color Temperature / Schedule | White light warmth control on lights; one-shot schedule payload on compatible plugs and schedule capability marker on some wall switches. |
 | `4` | Brightness / Humidity | Light intensity scaling, relative humidity levels on sensors, or gang-2 timers. |
 | `5` | Hue | 360-degree color hue control on addressable RGB lights. |
 | `6` | Saturation / Motion | Color saturation percentage, motion trigger status, or gang-3 timers. |
@@ -117,6 +153,8 @@ CozyLife devices report their functionalities via standard Data Point IDs (DPIDs
 | `10` | Moisture Status | Water-leak detection and alarm sensor. |
 | `11` | Smoke Detection | Smoke alarm status and alarm sensor. |
 | `14` | Report Interval | Sleep interval timer for battery-operated sensors (standard `1800s`; experimental `600s` on compatible firmware). |
+| `18` | Power-on State | Relay restore behavior after power loss on compatible plugs and wall switches. |
+| `19` | LED Status | Indicator LED behavior on compatible plugs and wall switches. |
 | `24` | Humidity Sensitivity | Delta threshold to trigger updates on environmental sensor arrays. |
 | `25` | Temp Sensitivity | Delta threshold to trigger updates on environmental sensor arrays. |
 | `26` | Cumulative Energy (kWh)| Exposes total energy consumption, fully compatible with HA Energy Dashboard. |
@@ -124,6 +162,7 @@ CozyLife devices report their functionalities via standard Data Point IDs (DPIDs
 | `28` | Active Power (W) | Live active load power monitoring. |
 | `29` | Line Voltage (V) | Live grid voltage monitoring. |
 | `30` | Electrical Fault | Exposes physical load fault alarms reported by power monitoring plugs. |
+| `32` | Overcurrent Protection | Config switch for compatible metered plugs. |
 | `101`| Occupancy Sensor | Proximity and movement detection via millimeter-wave radar modules. |
 
 ---

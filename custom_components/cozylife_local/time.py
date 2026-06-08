@@ -12,6 +12,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from .const import DOMAIN
 from .coordinator import CozyLifeCoordinator
 from .schedule import DEFAULT_SCHEDULE_ID, SCHEDULE_MANAGER, CozyLifeScheduleManager
+from .switch_options import supports_schedule_options
 
 
 async def async_setup_entry(
@@ -22,7 +23,7 @@ async def async_setup_entry(
     """Set up CozyLife schedule time entities."""
     coordinator: CozyLifeCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
-    if not coordinator.classification.supports_plug_metering:
+    if not supports_schedule_options(coordinator):
         return
 
     async_add_entities([CozyLifePlugScheduleTime(coordinator)])

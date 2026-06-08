@@ -38,7 +38,7 @@ set_effect:
             - 'chrismas'
 set_plug_schedule:
   name: Set plug schedule
-  description: Schedule a CozyLife metering plug to turn on or off.
+  description: Schedule a CozyLife switch or metering plug to turn on or off.
   target:
     entity:
       integration: cozylife_local
@@ -93,7 +93,7 @@ set_plug_schedule:
         boolean:
 clear_plug_schedule:
   name: Clear plug schedule
-  description: Clear one or more CozyLife metering plug schedules.
+  description: Clear one or more CozyLife switch or metering plug schedules.
   target:
     entity:
       integration: cozylife_local
