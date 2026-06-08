@@ -1,12 +1,16 @@
 {
   "domain": "cozylife_local",
   "name": "CozyLife Local",
-  "after_dependencies": ["network"],
-  "codeowners": ["@soulripper13"],
+  "after_dependencies": [
+    "network"
+  ],
+  "codeowners": [
+    "@soulripper13"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/soulripper13/cozylife_local",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/soulripper13/cozylife_local/issues",
   "requirements": [],
-  "version": "0.2.5"
+  "version": "0.2.6"
 }
