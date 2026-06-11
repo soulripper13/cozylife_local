@@ -165,6 +165,7 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self._report_interval_ignored_count = 0
         self._report_interval_unsupported = False
         self._experimental_interval_retry_logged = False
+        self._report_interval_write_miss_logged = False
         if self.classification.is_environment_sensor:
             _LOGGER.debug(
                 "[COZYLIFE] Sensor %s configured with report_interval=%ss, "
@@ -423,16 +424,19 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                 {SENSOR_REPORT_INTERVAL_DPID: target_interval}
             )
             if not accepted:
-                _LOGGER.warning(
-                    "[COZYLIFE] Report interval update attempt %s to %ss was "
-                    "not accepted by %s",
-                    write_attempts,
-                    target_interval,
-                    self.device.ip_address,
-                )
+                if not self._report_interval_write_miss_logged:
+                    self._report_interval_write_miss_logged = True
+                    _LOGGER.debug(
+                        "[COZYLIFE] Report interval update to %ss was not "
+                        "accepted by %s; the sensor may already be asleep or "
+                        "may not support this interval.",
+                        target_interval,
+                        self.device.ip_address,
+                    )
                 break
 
             accepted_write = True
+            self._report_interval_write_miss_logged = False
             self._effective_report_interval = target_interval
             await asyncio.sleep(SENSOR_REPORT_INTERVAL_CONFIRM_DELAY)
             readback = await self.device.async_get_state()
