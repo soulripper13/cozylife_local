@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .cozylife_api import CozyLifeDevice
 from .const import (
     DEFAULT_SENSOR_REPORT_INTERVAL,
+    LIGHT_COUNTDOWN,
     MIN_SENSOR_REPORT_INTERVAL,
     PLUG_CURRENT,
     PLUG_LED_STATUS,
@@ -405,6 +406,33 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
         return {**state_data, **hidden_state}
 
+    async def _async_add_hidden_light_state(
+        self,
+        state_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Merge safe light countdown state omitted from default state."""
+        if not self.classification.is_light or LIGHT_COUNTDOWN in state_data:
+            return state_data
+
+        model_info = get_model_info(self.device.pid)
+        known_dpids = set(self.device.dpid or [])
+        if model_info:
+            known_dpids.update(model_info.dpids)
+
+        if LIGHT_COUNTDOWN not in known_dpids:
+            return state_data
+
+        hidden_state = await self.device.async_get_state([LIGHT_COUNTDOWN])
+        if hidden_state is None:
+            _LOGGER.debug(
+                "[COZYLIFE] Failed to query hidden light countdown DPID %s from %s",
+                LIGHT_COUNTDOWN,
+                self.device.ip_address,
+            )
+            return state_data
+
+        return {**state_data, **hidden_state}
+
     async def _async_confirm_report_interval(self, state_data: Dict[str, Any]) -> Dict[str, Any]:
         """Write the report interval and keep it set while the sensor is awake."""
         if self._report_interval_unsupported:
@@ -523,6 +551,7 @@ class CozyLifeCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
             state_data = await self._async_get_environment_state()
             state_data = await self._async_add_hidden_switch_state(state_data)
+            state_data = await self._async_add_hidden_light_state(state_data)
 
             # Push sensitivity settings before report interval reinforcement so
             # DPID 14 can be the final write near the end of the wake window.

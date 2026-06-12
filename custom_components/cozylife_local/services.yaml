@@ -1,41 +1,3 @@
-set_all_effect:
-  name: Set all effect
-  description: Set all the cozylight effect.
-  fields:
-    effect:
-      name: Effect
-      description: Light effect.
-      required: true
-      selector:
-        select:
-          options:
-            - 'manual'
-            - 'natural'
-            - 'sleep'
-            - 'warm'
-            - 'study'
-            - 'chrismas'
-set_effect:
-  name: Set effect
-  description: Set a the light effect.
-  target:
-    entity:
-      integration: cozylife
-      domain: light
-  fields:
-    effect:
-      name: Effect
-      description: Light effect.
-      required: true
-      selector:
-        select:
-          options:
-            - 'manual'
-            - 'natural'
-            - 'sleep'
-            - 'warm'
-            - 'study'
-            - 'chrismas'
 set_plug_schedule:
   name: Set plug schedule
   description: Schedule a CozyLife switch or metering plug to turn on or off.
@@ -110,3 +72,65 @@ clear_plug_schedule:
       default: true
       selector:
         boolean:
+set_light_schedule:
+  name: Set light schedule
+  description: Schedule a CozyLife light to turn on or off using Home Assistant.
+  target:
+    entity:
+      integration: cozylife_local
+      domain: light
+  fields:
+    schedule_id:
+      name: Schedule ID
+      description: A stable name for this schedule.
+      default: default
+      selector:
+        text:
+    time:
+      name: Time
+      description: Local time when the schedule should run.
+      required: true
+      selector:
+        time:
+    action:
+      name: Action
+      description: Whether the light should turn on or off.
+      required: true
+      selector:
+        select:
+          options:
+            - turn_on
+            - turn_off
+    repeat:
+      name: Repeat
+      description: Days when the schedule should repeat. Leave empty for one time.
+      selector:
+        select:
+          multiple: true
+          options:
+            - mon
+            - tue
+            - wed
+            - thu
+            - fri
+            - sat
+            - sun
+    enabled:
+      name: Enabled
+      description: Whether the schedule should run.
+      default: true
+      selector:
+        boolean:
+clear_light_schedule:
+  name: Clear light schedule
+  description: Clear one or more CozyLife light schedules.
+  target:
+    entity:
+      integration: cozylife_local
+      domain: light
+  fields:
+    schedule_id:
+      name: Schedule ID
+      description: The schedule ID to clear. Leave empty to clear all schedules for this light.
+      selector:
+        text:

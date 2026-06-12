@@ -1,5 +1,4 @@
 import logging
-from typing import Any
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
@@ -8,7 +7,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, PLUG_COUNTDOWN
+from .const import DOMAIN, LIGHT_COUNTDOWN, PLUG_COUNTDOWN
 from .coordinator import CozyLifeCoordinator
 from .discovery import get_model_info
 
@@ -30,20 +29,27 @@ async def async_setup_entry(
         dpids.update(model_info.dpids)
 
     if (
-        PLUG_COUNTDOWN not in dpids
-        or not coordinator.classification.supports_plug_metering
+        PLUG_COUNTDOWN in dpids
+        and coordinator.classification.supports_plug_metering
     ):
-        _LOGGER.debug(
-            "Device %s has no supported number DPIDs, skipping number setup.",
-            coordinator.device.ip_address,
-        )
+        async_add_entities([CozyLifePlugCountdownNumber(coordinator)])
         return
 
-    async_add_entities([CozyLifeCountdownNumber(coordinator)])
+    if LIGHT_COUNTDOWN in dpids and coordinator.classification.is_light:
+        async_add_entities([CozyLifeLightCountdownNumber(coordinator)])
+        return
+
+    _LOGGER.debug(
+        "Device %s has no supported number DPIDs, skipping number setup.",
+        coordinator.device.ip_address,
+    )
 
 
-class CozyLifeCountdownNumber(CoordinatorEntity[CozyLifeCoordinator], NumberEntity):
-    """Countdown/timer control for CozyLife metered smart plugs."""
+class CozyLifeCountdownNumberBase(
+    CoordinatorEntity[CozyLifeCoordinator],
+    NumberEntity,
+):
+    """Countdown/timer control for CozyLife devices."""
 
     _attr_icon = "mdi:timer-outline"
     _attr_mode = NumberMode.BOX
@@ -52,10 +58,22 @@ class CozyLifeCountdownNumber(CoordinatorEntity[CozyLifeCoordinator], NumberEnti
     _attr_native_step = 1
     _attr_native_unit_of_measurement = UnitOfTime.SECONDS
 
-    def __init__(self, coordinator: CozyLifeCoordinator) -> None:
+    _countdown_dpid: str
+    _device_kind: str
+
+    def __init__(
+        self,
+        coordinator: CozyLifeCoordinator,
+        *,
+        dpid: str,
+        unique_suffix: str,
+        device_kind: str,
+    ) -> None:
         super().__init__(coordinator)
+        self._countdown_dpid = dpid
+        self._device_kind = device_kind
         self._attr_name = f"{coordinator.device.device_model_name} Countdown"
-        self._attr_unique_id = f"{coordinator.device.device_id}_countdown"
+        self._attr_unique_id = f"{coordinator.device.device_id}_{unique_suffix}"
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -68,7 +86,7 @@ class CozyLifeCountdownNumber(CoordinatorEntity[CozyLifeCoordinator], NumberEnti
 
     @property
     def native_value(self) -> int | None:
-        raw = self.coordinator.data.get(PLUG_COUNTDOWN)
+        raw = self.coordinator.data.get(self._countdown_dpid)
         if raw is None:
             return None
 
@@ -81,18 +99,47 @@ class CozyLifeCountdownNumber(CoordinatorEntity[CozyLifeCoordinator], NumberEnti
 
     async def async_set_native_value(self, value: float) -> None:
         countdown = max(0, min(MAX_COUNTDOWN_SECONDS, int(value)))
-        payload = {PLUG_COUNTDOWN: countdown}
+        payload = {self._countdown_dpid: countdown}
 
         if await self.coordinator.device.async_set_state(payload):
-            self.coordinator.data[PLUG_COUNTDOWN] = countdown
+            self.coordinator.data[self._countdown_dpid] = countdown
+            await self._async_after_countdown_set(countdown)
             self.async_write_ha_state()
         else:
             _LOGGER.warning(
-                "Failed to set countdown for CozyLife device %s to %s seconds",
+                "Failed to set %s countdown for CozyLife device %s to %s seconds",
+                self._device_kind,
                 self.coordinator.device.ip_address,
                 countdown,
             )
 
+    async def _async_after_countdown_set(self, countdown: int) -> None:
+        """Handle additional behavior after countdown writes."""
+
     @callback
     def _handle_coordinator_update(self) -> None:
         self.async_write_ha_state()
+
+
+class CozyLifePlugCountdownNumber(CozyLifeCountdownNumberBase):
+    """Countdown/timer control for CozyLife metered smart plugs."""
+
+    def __init__(self, coordinator: CozyLifeCoordinator) -> None:
+        super().__init__(
+            coordinator,
+            dpid=PLUG_COUNTDOWN,
+            unique_suffix="countdown",
+            device_kind="plug",
+        )
+
+
+class CozyLifeLightCountdownNumber(CozyLifeCountdownNumberBase):
+    """Countdown/timer control for CozyLife lights."""
+
+    def __init__(self, coordinator: CozyLifeCoordinator) -> None:
+        super().__init__(
+            coordinator,
+            dpid=LIGHT_COUNTDOWN,
+            unique_suffix="countdown",
+            device_kind="light",
+        )

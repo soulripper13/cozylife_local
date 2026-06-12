@@ -53,6 +53,7 @@ We are still looking for reports to expand coverage for:
 *   🧩 **Switch Option Controls**: Exposes supported wall-switch Power-on State, LED Status, and Home Assistant-backed schedule controls when the device catalog advertises the required DPIDs.
 *   📈 **Smart Energy Metering**: Auto-detects power-monitoring smart plug chips to expose voltage, current, active power, and cumulative energy sensors (compatible with the HA Energy Dashboard), plus plug options such as countdowns, schedules, LED behavior, power-on restore, and overcurrent protection where supported.
 *   💡 **State & Color-Mode Safeguards**: Smooth transitions and automatic work-mode state preservation prevents smart lights from glitching or flashing dark blue during custom RGB commands.
+*   🕒 **Light Schedules & Countdowns**: Exposes Home Assistant-backed smart light schedule controls plus validated local countdown support on compatible bulbs.
 *   🛠️ **Developer-Mode Setup**: Features a "Skip validation" config option, allowing advanced users to add remote devices or provision entities without waiting for active handshakes.
 
 ---
@@ -133,6 +134,15 @@ Compatible plugs can also expose:
 *   **LED Status** (`DPID 19`)
 *   **Overcurrent Protection** (`DPID 32`)
 
+### Smart Lights
+
+Compatible smart bulbs and light strips expose local light controls plus:
+
+*   **Countdown** (`DPID 13`) exposed as the same seconds-based countdown number pattern used by compatible plugs
+*   **Schedule controls** backed by Home Assistant for turn-on and turn-off actions, including enabled, time, action, and repeat controls
+
+Light schedules run through Home Assistant and call the selected light entity. The native light `normal_timer` payload (`DPID 14`) is not written until its app timer format is decoded for more variants.
+
 ---
 
 ## CozyLife Data Point IDs (DPIDs)
@@ -152,7 +162,8 @@ CozyLife devices report their functionalities via standard Data Point IDs (DPIDs
 | `9` | Battery Level | Exposes remaining battery charge on supported portable sensors. |
 | `10` | Moisture Status | Water-leak detection and alarm sensor. |
 | `11` | Smoke Detection | Smoke alarm status and alarm sensor. |
-| `14` | Report Interval | Sleep interval timer for battery-operated sensors (standard `1800s`; experimental `600s` on compatible firmware). |
+| `13` | Light Countdown | Countdown seconds on compatible lights. |
+| `14` | Report Interval / Light Timer | Sleep interval timer for battery-operated sensors (standard `1800s`; experimental `600s` on compatible firmware); native `normal_timer` payload on compatible lights. |
 | `18` | Power-on State | Relay restore behavior after power loss on compatible plugs and wall switches. |
 | `19` | LED Status | Indicator LED behavior on compatible plugs and wall switches. |
 | `24` | Humidity Sensitivity | Delta threshold to trigger updates on environmental sensor arrays. |

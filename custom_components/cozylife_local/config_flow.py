@@ -11,7 +11,10 @@ from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
     DOMAIN,
+    DEFAULT_MAX_KELVIN,
+    DEFAULT_MIN_KELVIN,
     DEFAULT_SENSOR_REPORT_INTERVAL,
+    LIGHT_KELVIN_RANGES,
     MIN_SENSOR_REPORT_INTERVAL,
     STANDARD_SENSOR_REPORT_INTERVAL,
     SENSOR_BATTERY,
@@ -80,12 +83,21 @@ def _experimental_short_interval_default(
     )
 
 
-def _device_schema_light(ip_address: str) -> vol.Schema:
+def _kelvin_range_for_pid(pid: str | None) -> tuple[int, int]:
+    """Return the default Kelvin range for a light model."""
+    return LIGHT_KELVIN_RANGES.get(
+        pid or "",
+        (DEFAULT_MIN_KELVIN, DEFAULT_MAX_KELVIN),
+    )
+
+
+def _device_schema_light(ip_address: str, pid: str | None = None) -> vol.Schema:
     """Return a light setup schema with the selected IP carried forward."""
+    min_kelvin, max_kelvin = _kelvin_range_for_pid(pid)
     return vol.Schema({
         vol.Required("ip_address", default=ip_address): str,
-        vol.Optional("min_kelvin", default=2000): vol.All(int, vol.Range(min=1000, max=10000)),
-        vol.Optional("max_kelvin", default=6500): vol.All(int, vol.Range(min=1000, max=10000)),
+        vol.Optional("min_kelvin", default=min_kelvin): vol.All(int, vol.Range(min=1000, max=10000)),
+        vol.Optional("max_kelvin", default=max_kelvin): vol.All(int, vol.Range(min=1000, max=10000)),
         vol.Optional("skip_validation", default=False): bool,
     })
 
@@ -196,16 +208,16 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     title=f"CozyLife Dev @ {ip_address}",
                     data={
                         "ip_address": ip_address,
-                        "min_kelvin": user_input.get("min_kelvin", 2000),
-                        "max_kelvin": user_input.get("max_kelvin", 6500),
+                        "min_kelvin": user_input.get("min_kelvin", DEFAULT_MIN_KELVIN),
+                        "max_kelvin": user_input.get("max_kelvin", DEFAULT_MAX_KELVIN),
                         "report_interval": user_input.get("report_interval", DEFAULT_SENSOR_REPORT_INTERVAL),
                     }
                 )
             else:
                 return await self._async_create_entry_from_ip(
                     ip_address,
-                    user_input.get("min_kelvin", 2000),
-                    user_input.get("max_kelvin", 6500),
+                    user_input.get("min_kelvin", DEFAULT_MIN_KELVIN),
+                    user_input.get("max_kelvin", DEFAULT_MAX_KELVIN),
                     user_input.get("report_interval", DEFAULT_SENSOR_REPORT_INTERVAL),
                     user_input,
                 )
@@ -270,8 +282,8 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             return await self._async_create_entry_from_ip(
                 ip_address,
-                2000,
-                6500,
+                DEFAULT_MIN_KELVIN,
+                DEFAULT_MAX_KELVIN,
                 DEFAULT_SENSOR_REPORT_INTERVAL,
                 {"ip_address": ip_address},
             )
@@ -423,6 +435,18 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 classification = classify_device(device.pid, device.device_type_code, dpids)
                 is_sensor = classification.is_environment_sensor
                 is_light = classification.is_light
+                if is_light:
+                    model_min_kelvin, model_max_kelvin = _kelvin_range_for_pid(device.pid)
+                    if (
+                        "min_kelvin" not in user_input
+                        or min_kelvin == DEFAULT_MIN_KELVIN
+                    ):
+                        min_kelvin = model_min_kelvin
+                    if (
+                        "max_kelvin" not in user_input
+                        or max_kelvin == DEFAULT_MAX_KELVIN
+                    ):
+                        max_kelvin = model_max_kelvin
 
                 # If this is a light and kelvin fields weren't provided yet, re-show with light schema
                 if is_light and "min_kelvin" not in user_input:
@@ -431,7 +455,7 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._device_model_name = device.device_model_name
                     return self.async_show_form(
                         step_id="user",
-                        data_schema=_device_schema_light(ip_address),
+                        data_schema=_device_schema_light(ip_address, device.pid),
                         errors={},
                         description_placeholders={"ip_address": ip_address},
                     )
@@ -456,8 +480,12 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         "pid": device.pid,
                         "device_type_code": device.device_type_code,
                         "dpids": dpids,
-                        "min_kelvin": min_kelvin if is_light else 2000,
-                        "max_kelvin": max_kelvin if is_light else 6500,
+                        "min_kelvin": (
+                            min_kelvin if is_light else DEFAULT_MIN_KELVIN
+                        ),
+                        "max_kelvin": (
+                            max_kelvin if is_light else DEFAULT_MAX_KELVIN
+                        ),
                         EXPERIMENTAL_SHORT_INTERVAL_KEY: (
                             user_input.get(EXPERIMENTAL_SHORT_INTERVAL_KEY, False)
                             if is_sensor
@@ -531,8 +559,29 @@ class CozyLifeOptionsFlow(config_entries.OptionsFlow):
 
         schema_fields: Dict[Any, Any] = {}
         if is_light:
-            schema_fields[vol.Optional("min_kelvin", default=self._config_entry.data.get("min_kelvin", 2000))] = vol.All(int, vol.Range(min=1000, max=10000))
-            schema_fields[vol.Optional("max_kelvin", default=self._config_entry.data.get("max_kelvin", 6500))] = vol.All(int, vol.Range(min=1000, max=10000))
+            model_min_kelvin, model_max_kelvin = _kelvin_range_for_pid(pid)
+            stored_min_kelvin = self._config_entry.data.get("min_kelvin", DEFAULT_MIN_KELVIN)
+            stored_max_kelvin = self._config_entry.data.get("max_kelvin", DEFAULT_MAX_KELVIN)
+            schema_fields[
+                vol.Optional(
+                    "min_kelvin",
+                    default=(
+                        model_min_kelvin
+                        if stored_min_kelvin == DEFAULT_MIN_KELVIN
+                        else stored_min_kelvin
+                    ),
+                )
+            ] = vol.All(int, vol.Range(min=1000, max=10000))
+            schema_fields[
+                vol.Optional(
+                    "max_kelvin",
+                    default=(
+                        model_max_kelvin
+                        if stored_max_kelvin == DEFAULT_MAX_KELVIN
+                        else stored_max_kelvin
+                    ),
+                )
+            ] = vol.All(int, vol.Range(min=1000, max=10000))
         if is_sensor:
             experimental = _experimental_short_interval_default(self._config_entry)
             schema_fields[

@@ -12,7 +12,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from .const import DOMAIN
 from .coordinator import CozyLifeCoordinator
 from .schedule import DEFAULT_SCHEDULE_ID, SCHEDULE_MANAGER, CozyLifeScheduleManager
-from .switch_options import supports_schedule_options
+from .switch_options import supports_light_schedule_options, supports_schedule_options
 
 
 async def async_setup_entry(
@@ -23,16 +23,23 @@ async def async_setup_entry(
     """Set up CozyLife schedule time entities."""
     coordinator: CozyLifeCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
-    if not supports_schedule_options(coordinator):
-        return
+    entities = []
+    if supports_schedule_options(coordinator):
+        entities.append(CozyLifePlugScheduleTime(coordinator))
+    if supports_light_schedule_options(coordinator):
+        entities.append(CozyLifeLightScheduleTime(coordinator))
 
-    async_add_entities([CozyLifePlugScheduleTime(coordinator)])
+    if entities:
+        async_add_entities(entities)
 
 
 class CozyLifePlugScheduleTime(TimeEntity):
     """Default plug schedule time."""
 
     _attr_icon = "mdi:clock-outline"
+    _entity_domain = "switch"
+    _unique_suffix = "schedule_time"
+    _name_suffix = "Schedule"
 
     def __init__(
         self,
@@ -41,8 +48,12 @@ class CozyLifePlugScheduleTime(TimeEntity):
     ) -> None:
         self.coordinator = coordinator
         self._schedule_id = schedule_id
-        self._attr_name = f"{coordinator.device.device_model_name} Schedule"
-        self._attr_unique_id = f"{coordinator.device.device_id}_schedule_time"
+        self._attr_name = (
+            f"{coordinator.device.device_model_name} {self._name_suffix}"
+        )
+        self._attr_unique_id = (
+            f"{coordinator.device.device_id}_{self._unique_suffix}"
+        )
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -62,6 +73,7 @@ class CozyLifePlugScheduleTime(TimeEntity):
         schedule = self._manager.schedule_for_coordinator(
             self.coordinator,
             self._schedule_id,
+            entity_domain=self._entity_domain,
         )
         value = str(schedule.get("time", "23:00:00"))
         for fmt in ("%H:%M:%S", "%H:%M"):
@@ -76,5 +88,13 @@ class CozyLifePlugScheduleTime(TimeEntity):
             self.coordinator,
             self._schedule_id,
             schedule_time=value,
+            entity_domain=self._entity_domain,
         )
         self.async_write_ha_state()
+
+
+class CozyLifeLightScheduleTime(CozyLifePlugScheduleTime):
+    """Default light schedule time."""
+
+    _entity_domain = "light"
+    _unique_suffix = "light_schedule_time"

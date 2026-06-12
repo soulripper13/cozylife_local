@@ -28,10 +28,20 @@ from .const import (
     WORK_MODE,
     DEFAULT_MIN_KELVIN,
     DEFAULT_MAX_KELVIN,
+    LIGHT_KELVIN_RANGES,
 )
 from .coordinator import CozyLifeCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _kelvin_range_for_pid(pid: str | None) -> tuple[int, int]:
+    """Return the default Kelvin range for a light model."""
+    return LIGHT_KELVIN_RANGES.get(
+        pid or "",
+        (DEFAULT_MIN_KELVIN, DEFAULT_MAX_KELVIN),
+    )
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -64,13 +74,26 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
         super().__init__(coordinator)
         self._attr_name = coordinator.device.device_model_name
         self._attr_unique_id = f"{coordinator.device.device_id}_light"
+        model_min_kelvin, model_max_kelvin = _kelvin_range_for_pid(
+            coordinator.device.pid
+        )
+        stored_min_kelvin = entry.data.get("min_kelvin", DEFAULT_MIN_KELVIN)
+        stored_max_kelvin = entry.data.get("max_kelvin", DEFAULT_MAX_KELVIN)
         self._min_kelvin = entry.options.get(
             "min_kelvin",
-            entry.data.get("min_kelvin", DEFAULT_MIN_KELVIN),
+            (
+                model_min_kelvin
+                if stored_min_kelvin == DEFAULT_MIN_KELVIN
+                else stored_min_kelvin
+            ),
         )
         self._max_kelvin = entry.options.get(
             "max_kelvin",
-            entry.data.get("max_kelvin", DEFAULT_MAX_KELVIN),
+            (
+                model_max_kelvin
+                if stored_max_kelvin == DEFAULT_MAX_KELVIN
+                else stored_max_kelvin
+            ),
         )
         
         self._supported_color_modes: set[ColorMode] = set()
@@ -131,7 +154,13 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
         if ColorMode.BRIGHTNESS in self._supported_color_modes and BRIGHT in self.coordinator.data:
             return ColorMode.BRIGHTNESS
 
-        # Fallback to on/off
+        if ColorMode.COLOR_TEMP in self._supported_color_modes:
+            return ColorMode.COLOR_TEMP
+        if ColorMode.HS in self._supported_color_modes:
+            return ColorMode.HS
+        if ColorMode.BRIGHTNESS in self._supported_color_modes:
+            return ColorMode.BRIGHTNESS
+
         return ColorMode.ONOFF
 
     @property
@@ -192,7 +221,8 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
         # Match original integration where work mode is supported.
-        payload: Dict[str, Any] = {SWITCH: 255}
+        payload: Dict[str, Any] = {SWITCH: 1}
+
         if WORK_MODE in self.coordinator.device.dpid:
             payload[WORK_MODE] = 0
 

@@ -1,4 +1,4 @@
-"""Schedule services for CozyLife Local plug timers."""
+"""Schedule services for CozyLife Local timers."""
 
 from __future__ import annotations
 
@@ -24,6 +24,8 @@ _LOGGER = logging.getLogger(__name__)
 
 SERVICE_SET_PLUG_SCHEDULE = "set_plug_schedule"
 SERVICE_CLEAR_PLUG_SCHEDULE = "clear_plug_schedule"
+SERVICE_SET_LIGHT_SCHEDULE = "set_light_schedule"
+SERVICE_CLEAR_LIGHT_SCHEDULE = "clear_light_schedule"
 
 SCHEDULE_MANAGER = "schedule_manager"
 STORE_VERSION = 1
@@ -77,6 +79,24 @@ SET_PLUG_SCHEDULE_SCHEMA = vol.Schema(
     }
 )
 
+SET_LIGHT_SCHEDULE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTITY_ID): cv.entity_ids,
+        vol.Optional(CONF_TARGET): vol.Schema(
+            {vol.Optional(ATTR_ENTITY_ID): cv.entity_ids},
+            extra=vol.ALLOW_EXTRA,
+        ),
+        vol.Optional(CONF_SCHEDULE_ID, default=DEFAULT_SCHEDULE_ID): cv.string,
+        vol.Required(CONF_TIME): cv.string,
+        vol.Required(CONF_ACTION): vol.In([ACTION_TURN_ON, ACTION_TURN_OFF]),
+        vol.Optional(CONF_REPEAT, default=[]): vol.All(
+            cv.ensure_list,
+            [vol.In(list(WEEKDAYS))],
+        ),
+        vol.Optional(CONF_ENABLED, default=True): cv.boolean,
+    }
+)
+
 CLEAR_PLUG_SCHEDULE_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_ENTITY_ID): cv.entity_ids,
@@ -89,8 +109,19 @@ CLEAR_PLUG_SCHEDULE_SCHEMA = vol.Schema(
     }
 )
 
+CLEAR_LIGHT_SCHEDULE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTITY_ID): cv.entity_ids,
+        vol.Optional(CONF_TARGET): vol.Schema(
+            {vol.Optional(ATTR_ENTITY_ID): cv.entity_ids},
+            extra=vol.ALLOW_EXTRA,
+        ),
+        vol.Optional(CONF_SCHEDULE_ID): cv.string,
+    }
+)
 
-def _entity_ids_from_call(call: ServiceCall) -> list[str]:
+
+def _entity_ids_from_call(call: ServiceCall, entity_domain: str) -> list[str]:
     """Return entity IDs from direct data or Home Assistant target payloads."""
     entity_ids = list(call.data.get(ATTR_ENTITY_ID, []))
     target = call.data.get(CONF_TARGET)
@@ -98,7 +129,7 @@ def _entity_ids_from_call(call: ServiceCall) -> list[str]:
         entity_ids.extend(target.get(ATTR_ENTITY_ID, []))
 
     if not entity_ids:
-        raise HomeAssistantError("A CozyLife plug switch entity is required")
+        raise HomeAssistantError(f"A CozyLife {entity_domain} entity is required")
 
     return list(dict.fromkeys(entity_ids))
 
@@ -135,6 +166,15 @@ def _encode_device_timer_schedule(schedule_time: dt_time, action: str) -> str:
     when = _next_local_datetime(schedule_time)
     timestamp = int(when.timestamp())
     return f"{TIMER_PREFIX_BY_ACTION[action]}{timestamp:08X}{'0' * 40}"
+
+
+def _normalize_repeat_days(repeat: Any) -> list[str]:
+    """Return valid repeat days once, in weekday order."""
+    if not isinstance(repeat, list):
+        return []
+
+    days = {day for day in repeat if day in WEEKDAYS}
+    return [day for day in WEEKDAYS if day in days]
 
 
 class CozyLifeScheduleManager:
@@ -175,6 +215,20 @@ class CozyLifeScheduleManager:
                 self._async_handle_clear_schedule,
                 schema=CLEAR_PLUG_SCHEDULE_SCHEMA,
             )
+        if not self.hass.services.has_service(DOMAIN, SERVICE_SET_LIGHT_SCHEDULE):
+            self.hass.services.async_register(
+                DOMAIN,
+                SERVICE_SET_LIGHT_SCHEDULE,
+                self._async_handle_set_light_schedule,
+                schema=SET_LIGHT_SCHEDULE_SCHEMA,
+            )
+        if not self.hass.services.has_service(DOMAIN, SERVICE_CLEAR_LIGHT_SCHEDULE):
+            self.hass.services.async_register(
+                DOMAIN,
+                SERVICE_CLEAR_LIGHT_SCHEDULE,
+                self._async_handle_clear_light_schedule,
+                schema=CLEAR_LIGHT_SCHEDULE_SCHEMA,
+            )
 
     async def async_unload(self) -> None:
         """Stop the schedule timer."""
@@ -185,24 +239,30 @@ class CozyLifeScheduleManager:
             self.hass.services.async_remove(DOMAIN, SERVICE_SET_PLUG_SCHEDULE)
         if self.hass.services.has_service(DOMAIN, SERVICE_CLEAR_PLUG_SCHEDULE):
             self.hass.services.async_remove(DOMAIN, SERVICE_CLEAR_PLUG_SCHEDULE)
+        if self.hass.services.has_service(DOMAIN, SERVICE_SET_LIGHT_SCHEDULE):
+            self.hass.services.async_remove(DOMAIN, SERVICE_SET_LIGHT_SCHEDULE)
+        if self.hass.services.has_service(DOMAIN, SERVICE_CLEAR_LIGHT_SCHEDULE):
+            self.hass.services.async_remove(DOMAIN, SERVICE_CLEAR_LIGHT_SCHEDULE)
 
     async def _async_save(self) -> None:
         await self._store.async_save({"schedules": self._schedules})
 
-    def _switch_entity_id_for_coordinator(
+    def _entity_id_for_coordinator(
         self,
         coordinator: CozyLifeCoordinator,
+        entity_domain: str,
     ) -> str:
-        """Return the primary plug switch entity for a coordinator."""
+        """Return the primary scheduled entity for a coordinator."""
+        unique_suffix = "light" if entity_domain == "light" else "1"
         registry = er.async_get(self.hass)
         entity_id = registry.async_get_entity_id(
-            "switch",
+            entity_domain,
             DOMAIN,
-            f"{coordinator.device.device_id}_1",
+            f"{coordinator.device.device_id}_{unique_suffix}",
         )
         if entity_id is None:
             raise HomeAssistantError(
-                f"Could not find plug switch entity for {coordinator.device.device_id}"
+                f"Could not find CozyLife {entity_domain} entity for {coordinator.device.device_id}"
             )
         return entity_id
 
@@ -217,9 +277,11 @@ class CozyLifeScheduleManager:
         self,
         coordinator: CozyLifeCoordinator,
         schedule_id: str = DEFAULT_SCHEDULE_ID,
+        *,
+        entity_domain: str = "switch",
     ) -> dict[str, Any]:
         """Return a stored schedule or a default disabled schedule."""
-        entity_id = self._switch_entity_id_for_coordinator(coordinator)
+        entity_id = self._entity_id_for_coordinator(coordinator, entity_domain)
         key = self._schedule_key(coordinator, schedule_id)
         schedule = dict(
             self._schedules.get(
@@ -235,6 +297,7 @@ class CozyLifeScheduleManager:
             )
         )
         schedule["entity_id"] = entity_id
+        schedule["entity_domain"] = entity_domain
         schedule["schedule_id"] = schedule_id
         return schedule
 
@@ -248,33 +311,41 @@ class CozyLifeScheduleManager:
         repeat: list[str] | None = None,
         enabled: bool | None = None,
         sync_to_device: bool = True,
+        entity_domain: str = "switch",
     ) -> dict[str, Any]:
         """Update the default UI schedule for a coordinator."""
-        entity_id = self._switch_entity_id_for_coordinator(coordinator)
-        schedule = self.schedule_for_coordinator(coordinator, schedule_id)
+        entity_id = self._entity_id_for_coordinator(coordinator, entity_domain)
+        schedule = self.schedule_for_coordinator(
+            coordinator,
+            schedule_id,
+            entity_domain=entity_domain,
+        )
 
         if schedule_time is not None:
             schedule["time"] = schedule_time.strftime("%H:%M:%S")
         if action is not None:
             schedule["action"] = action
         if repeat is not None:
-            schedule["repeat"] = repeat
+            schedule["repeat"] = _normalize_repeat_days(repeat)
         if enabled is not None:
             schedule["enabled"] = enabled
 
         parsed_time = _parse_time(schedule["time"])
-        repeat_days = list(schedule.get("repeat", []))
+        repeat_days = _normalize_repeat_days(schedule.get("repeat", []))
+        schedule["repeat"] = repeat_days
         if not repeat_days:
             schedule["run_at"] = _next_local_datetime(parsed_time).isoformat()
         else:
             schedule.pop("run_at", None)
 
         schedule["entity_id"] = entity_id
+        schedule["entity_domain"] = entity_domain
         key = self._schedule_key(coordinator, schedule_id)
         self._schedules[key] = schedule
 
         if (
-            schedule.get("enabled", True)
+            entity_domain == "switch"
+            and schedule.get("enabled", True)
             and sync_to_device
             and not repeat_days
             and schedule.get("action") == ACTION_TURN_OFF
@@ -285,6 +356,12 @@ class CozyLifeScheduleManager:
                 parsed_time,
                 schedule["action"],
             )
+        elif (
+            entity_domain == "switch"
+            and sync_to_device
+            and coordinator.classification.supports_plug_metering
+        ):
+            await self._async_try_clear_device_schedule(entity_id)
 
         await self._async_save()
         return schedule
@@ -295,21 +372,23 @@ class CozyLifeScheduleManager:
         schedule_id: str = DEFAULT_SCHEDULE_ID,
         *,
         clear_device: bool = True,
+        entity_domain: str = "switch",
     ) -> None:
         """Clear a coordinator schedule."""
-        entity_id = self._switch_entity_id_for_coordinator(coordinator)
+        entity_id = self._entity_id_for_coordinator(coordinator, entity_domain)
         self._schedules.pop(self._schedule_key(coordinator, schedule_id), None)
-        if clear_device:
+        if clear_device and entity_domain == "switch":
             await self._async_clear_device_schedule(entity_id)
         await self._async_save()
 
     def _coordinator_from_entity_id(
         self,
         entity_id: str,
+        entity_domain: str = "switch",
     ) -> CozyLifeCoordinator:
-        if not entity_id.startswith("switch."):
+        if not entity_id.startswith(f"{entity_domain}."):
             raise HomeAssistantError(
-                f"{entity_id} is not a switch entity; use the plug switch entity"
+                f"{entity_id} is not a {entity_domain} entity"
             )
 
         registry = er.async_get(self.hass)
@@ -324,9 +403,16 @@ class CozyLifeScheduleManager:
             raise HomeAssistantError(
                 f"Could not find CozyLife coordinator for {entity_id}"
             )
-        if not coordinator.classification.supports_switch_entities:
+        if (
+            entity_domain == "switch"
+            and not coordinator.classification.supports_switch_entities
+        ):
             raise HomeAssistantError(
                 f"{entity_id} does not belong to a supported CozyLife switch"
+            )
+        if entity_domain == "light" and not coordinator.classification.is_light:
+            raise HomeAssistantError(
+                f"{entity_id} does not belong to a supported CozyLife light"
             )
 
         return coordinator
@@ -359,22 +445,43 @@ class CozyLifeScheduleManager:
         coordinator.data[PLUG_TIMER_SCHEDULE] = EMPTY_TIMER_SCHEDULE
         coordinator.async_set_updated_data(coordinator.data)
 
-    async def _async_handle_set_schedule(self, call: ServiceCall) -> None:
-        entity_ids = _entity_ids_from_call(call)
+    async def _async_try_clear_device_schedule(self, entity_id: str) -> None:
+        """Best-effort clear of a native one-shot timer when HA owns the schedule."""
+        try:
+            await self._async_clear_device_schedule(entity_id)
+        except HomeAssistantError as err:
+            _LOGGER.debug(
+                "Could not clear native CozyLife timer for %s: %s",
+                entity_id,
+                err,
+            )
+
+    async def _async_set_schedule_from_call(
+        self,
+        call: ServiceCall,
+        *,
+        entity_domain: str,
+        sync_to_device: bool,
+    ) -> None:
+        """Store schedules from a Home Assistant service call."""
+        entity_ids = _entity_ids_from_call(call, entity_domain)
         schedule_id = call.data[CONF_SCHEDULE_ID]
         schedule_time = _parse_time(call.data[CONF_TIME])
         action = call.data[CONF_ACTION]
-        repeat = list(call.data[CONF_REPEAT])
+        repeat = _normalize_repeat_days(call.data[CONF_REPEAT])
         enabled = call.data[CONF_ENABLED]
-        sync_to_device = call.data[CONF_SYNC_TO_DEVICE]
 
         for entity_id in entity_ids:
-            coordinator = self._coordinator_from_entity_id(entity_id)
+            coordinator = self._coordinator_from_entity_id(
+                entity_id,
+                entity_domain,
+            )
             key = self._schedule_key(coordinator, schedule_id)
             scheduled_at = _next_local_datetime(schedule_time)
 
             self._schedules[key] = {
                 "entity_id": entity_id,
+                "entity_domain": entity_domain,
                 "schedule_id": schedule_id,
                 "time": schedule_time.strftime("%H:%M:%S"),
                 "action": action,
@@ -385,36 +492,83 @@ class CozyLifeScheduleManager:
                 self._schedules[key]["run_at"] = scheduled_at.isoformat()
 
             if (
-                enabled
+                entity_domain == "switch"
+                and enabled
                 and sync_to_device
                 and not repeat
                 and action == ACTION_TURN_OFF
                 and coordinator.classification.supports_plug_metering
             ):
                 await self._async_write_device_schedule(entity_id, schedule_time, action)
+            elif (
+                entity_domain == "switch"
+                and sync_to_device
+                and coordinator.classification.supports_plug_metering
+            ):
+                await self._async_try_clear_device_schedule(entity_id)
 
         await self._async_save()
 
-    async def _async_handle_clear_schedule(self, call: ServiceCall) -> None:
-        entity_ids = _entity_ids_from_call(call)
+    async def _async_clear_schedule_from_call(
+        self,
+        call: ServiceCall,
+        *,
+        entity_domain: str,
+        clear_device: bool,
+    ) -> None:
+        """Clear schedules from a Home Assistant service call."""
+        entity_ids = _entity_ids_from_call(call, entity_domain)
         schedule_id = call.data.get(CONF_SCHEDULE_ID)
-        clear_device = call.data[CONF_CLEAR_DEVICE]
 
         for entity_id in entity_ids:
             if schedule_id:
-                coordinator = self._coordinator_from_entity_id(entity_id)
+                coordinator = self._coordinator_from_entity_id(
+                    entity_id,
+                    entity_domain,
+                )
                 self._schedules.pop(self._schedule_key(coordinator, schedule_id), None)
             else:
-                coordinator = self._coordinator_from_entity_id(entity_id)
+                coordinator = self._coordinator_from_entity_id(
+                    entity_id,
+                    entity_domain,
+                )
                 prefix = f"{coordinator.device.device_id}:"
                 for key in list(self._schedules):
                     if key.startswith(prefix):
                         self._schedules.pop(key, None)
 
-            if clear_device:
+            if clear_device and entity_domain == "switch":
                 await self._async_clear_device_schedule(entity_id)
 
         await self._async_save()
+
+    async def _async_handle_set_schedule(self, call: ServiceCall) -> None:
+        await self._async_set_schedule_from_call(
+            call,
+            entity_domain="switch",
+            sync_to_device=call.data[CONF_SYNC_TO_DEVICE],
+        )
+
+    async def _async_handle_clear_schedule(self, call: ServiceCall) -> None:
+        await self._async_clear_schedule_from_call(
+            call,
+            entity_domain="switch",
+            clear_device=call.data[CONF_CLEAR_DEVICE],
+        )
+
+    async def _async_handle_set_light_schedule(self, call: ServiceCall) -> None:
+        await self._async_set_schedule_from_call(
+            call,
+            entity_domain="light",
+            sync_to_device=False,
+        )
+
+    async def _async_handle_clear_light_schedule(self, call: ServiceCall) -> None:
+        await self._async_clear_schedule_from_call(
+            call,
+            entity_domain="light",
+            clear_device=False,
+        )
 
     @callback
     def _async_time_changed(self, now: datetime) -> None:
@@ -430,7 +584,8 @@ class CozyLifeScheduleManager:
             entity_id = schedule.get("entity_id")
             if not entity_id:
                 continue
-            repeat = schedule.get("repeat", [])
+            entity_domain = schedule.get("entity_domain", "switch")
+            repeat = _normalize_repeat_days(schedule.get("repeat", []))
             if repeat:
                 if weekday not in [WEEKDAYS[day] for day in repeat]:
                     continue
@@ -457,7 +612,7 @@ class CozyLifeScheduleManager:
                 self.hass.async_create_task(self._async_save())
             self.hass.async_create_task(
                 self.hass.services.async_call(
-                    "switch",
+                    entity_domain,
                     schedule["action"],
                     {ATTR_ENTITY_ID: entity_id},
                     blocking=True,

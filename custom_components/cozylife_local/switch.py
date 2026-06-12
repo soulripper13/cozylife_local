@@ -15,7 +15,11 @@ from .schedule import (
     SCHEDULE_MANAGER,
     CozyLifeScheduleManager,
 )
-from .switch_options import supported_dpids, supports_schedule_options
+from .switch_options import (
+    supported_dpids,
+    supports_light_schedule_options,
+    supports_schedule_options,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,9 +39,13 @@ async def async_setup_entry(
         _LOGGER.error(f"Missing DPID list for {coordinator.device.ip_address}. Cannot set up switch.")
         return
 
-    if not coordinator.classification.supports_switch_entities:
+    if (
+        not coordinator.classification.supports_switch_entities
+        and not supports_light_schedule_options(coordinator)
+    ):
         _LOGGER.debug(
-            "Device %s (Type: %s, Source: %s) does not support switch entities, "
+            "Device %s (Type: %s, Source: %s) does not support switch entities "
+            "or light schedule options, "
             "skipping switch platform setup.",
             coordinator.device.ip_address,
             coordinator.classification.effective_type_code,
@@ -45,23 +53,25 @@ async def async_setup_entry(
         )
         return
 
-    entity_count = coordinator.classification.switch_entity_count
-    _LOGGER.info(
-        "Detected %s %s entity/entities at %s with DPIDs: %s",
-        entity_count,
-        "outlet" if coordinator.classification.is_outlet else "switch",
-        coordinator.device.ip_address,
-        coordinator.device.dpid,
-    )
-
-    entities = [
-        CozyLifeSwitch(
-            coordinator,
-            gang_bit=gang_bit,
-            total_entities=entity_count,
+    entities = []
+    if coordinator.classification.supports_switch_entities:
+        entity_count = coordinator.classification.switch_entity_count
+        _LOGGER.info(
+            "Detected %s %s entity/entities at %s with DPIDs: %s",
+            entity_count,
+            "outlet" if coordinator.classification.is_outlet else "switch",
+            coordinator.device.ip_address,
+            coordinator.device.dpid,
         )
-        for gang_bit in range(entity_count)
-    ]
+
+        entities.extend(
+            CozyLifeSwitch(
+                coordinator,
+                gang_bit=gang_bit,
+                total_entities=entity_count,
+            )
+            for gang_bit in range(entity_count)
+        )
 
     dpids = supported_dpids(coordinator)
     if coordinator.classification.supports_plug_metering:
@@ -69,6 +79,8 @@ async def async_setup_entry(
             entities.append(CozyLifePlugBooleanSwitch(coordinator))
     if supports_schedule_options(coordinator):
         entities.append(CozyLifePlugScheduleEnabledSwitch(coordinator))
+    if supports_light_schedule_options(coordinator):
+        entities.append(CozyLifeLightScheduleEnabledSwitch(coordinator))
 
     if entities:
         async_add_entities(entities)
@@ -196,6 +208,8 @@ class CozyLifePlugScheduleEnabledSwitch(CozyLifePlugScheduleSwitchBase):
     """Enable the default plug schedule."""
 
     _attr_icon = "mdi:calendar-check"
+    _entity_domain = "switch"
+    _unique_suffix = "schedule_enabled"
 
     def __init__(
         self,
@@ -204,13 +218,16 @@ class CozyLifePlugScheduleEnabledSwitch(CozyLifePlugScheduleSwitchBase):
     ) -> None:
         super().__init__(coordinator, schedule_id)
         self._attr_name = f"{coordinator.device.device_model_name} Schedule Enabled"
-        self._attr_unique_id = f"{coordinator.device.device_id}_schedule_enabled"
+        self._attr_unique_id = (
+            f"{coordinator.device.device_id}_{self._unique_suffix}"
+        )
 
     @property
     def is_on(self) -> bool:
         schedule = self._manager.schedule_for_coordinator(
             self.coordinator,
             self._schedule_id,
+            entity_domain=self._entity_domain,
         )
         return bool(schedule.get("enabled", False))
 
@@ -219,6 +236,7 @@ class CozyLifePlugScheduleEnabledSwitch(CozyLifePlugScheduleSwitchBase):
             self.coordinator,
             self._schedule_id,
             enabled=True,
+            entity_domain=self._entity_domain,
         )
         self.async_write_ha_state()
 
@@ -227,9 +245,16 @@ class CozyLifePlugScheduleEnabledSwitch(CozyLifePlugScheduleSwitchBase):
             self.coordinator,
             self._schedule_id,
             enabled=False,
-            sync_to_device=False,
+            entity_domain=self._entity_domain,
         )
         self.async_write_ha_state()
+
+
+class CozyLifeLightScheduleEnabledSwitch(CozyLifePlugScheduleEnabledSwitch):
+    """Enable the default light schedule."""
+
+    _entity_domain = "light"
+    _unique_suffix = "light_schedule_enabled"
 
 
 class CozyLifePlugBooleanSwitch(

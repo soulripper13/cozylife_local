@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .const import PLUG_TIMER_SCHEDULE
+from .const import LIGHT_COUNTDOWN, LIGHT_NORMAL_TIMER, PLUG_TIMER_SCHEDULE
 from .coordinator import CozyLifeCoordinator
 from .discovery import get_model_info
 
@@ -26,4 +26,12 @@ def supports_schedule_options(coordinator: CozyLifeCoordinator) -> bool:
     return (
         supports_switch_options(coordinator)
         and PLUG_TIMER_SCHEDULE in supported_dpids(coordinator)
+    )
+
+
+def supports_light_schedule_options(coordinator: CozyLifeCoordinator) -> bool:
+    """Return whether the light can expose HA-backed schedule controls."""
+    return (
+        coordinator.classification.is_light
+        and bool({LIGHT_COUNTDOWN, LIGHT_NORMAL_TIMER} & supported_dpids(coordinator))
     )

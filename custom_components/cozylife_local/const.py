@@ -11,6 +11,8 @@ TEMP = '3'
 BRIGHT = '4'
 HUE = '5'
 SAT = '6'
+LIGHT_COUNTDOWN = '13'
+LIGHT_NORMAL_TIMER = '14'
 
 # Sensor DPIDs (temperature/humidity sensor, PID=Z4tRml)
 SENSOR_TEMPERATURE = '8'   # raw value ÷ 10 = °C
@@ -52,6 +54,13 @@ PLATFORMS = [
 
 DEFAULT_MIN_KELVIN = 2000
 DEFAULT_MAX_KELVIN = 6500
+
+# Confirmed model-specific color temperature ranges.
+# CozyLife lights report DPID 3 on a normalized 0-1000 scale, but do not expose
+# the physical Kelvin endpoints over the local protocol.
+LIGHT_KELVIN_RANGES = {
+    "rju4K7": (2700, 6500),
+}
 
 SENSOR_REPORT_INTERVAL_DPID = '14'
 MIN_SENSOR_REPORT_INTERVAL = 600  # seconds
