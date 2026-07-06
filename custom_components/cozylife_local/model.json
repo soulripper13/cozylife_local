@@ -22034,6 +22034,46 @@
             "pid": "97555R",
             "s": 0,
             "s_u": "2021062115130027"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              13,
+              14,
+              15,
+              21
+            ],
+            "ext": [],
+            "g_u": "2021121017330060",
+            "i": "https://static-cf-cn.doiting.com/storage/images/519bb1cfcac721817d6760c3c7b2db45.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/33b8ec4a24cf18d6c14c8cd1d669a4ac.png",
+                "n": "三路灯带_1",
+                "url": "2021121015310059"
+              }
+            ],
+            "n": "Music Rhythm Light Strip",
+            "net": "02",
+            "p": "1",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "MMhHH5",
+            "s": 0,
+            "s_u": "2021121018070061"
           }
         ],
         "n": "Light"
@@ -32531,6 +32571,88 @@
             "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "ODigpb",
+            "s": 0,
+            "s_u": "2021070311510032"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              3,
+              18,
+              19,
+              20,
+              21,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              42
+            ],
+            "ext": [],
+            "g_u": "2021060410240020",
+            "i": "https://static-cf-cn.doiting.com/storage/images/b3722ea5477ec214c335961f673b342b.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/d27c16558632021f0a774fe5f14a35ad.png",
+                "n": "Single channel metering socket",
+                "url": "2021072815080038"
+              }
+            ],
+            "n": "Metering Socket",
+            "net": "02",
+            "p": "1",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "2u3uX4",
+            "s": 0,
+            "s_u": "2021070311510032"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              3,
+              18,
+              19,
+              20,
+              21,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              42
+            ],
+            "ext": [],
+            "g_u": "2021060410240020",
+            "i": "https://static-cf-cn.doiting.com/storage/images/b3722ea5477ec214c335961f673b342b.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/d27c16558632021f0a774fe5f14a35ad.png",
+                "n": "Single channel metering socket",
+                "url": "2021072815080038"
+              }
+            ],
+            "n": "Metering Socket",
+            "net": "02",
+            "p": "1",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "MpTrMC",
             "s": 0,
             "s_u": "2021070311510032"
           }
