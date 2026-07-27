@@ -32655,6 +32655,47 @@
             "pid": "MpTrMC",
             "s": 0,
             "s_u": "2021070311510032"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              3,
+              18,
+              19,
+              20,
+              21,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              42
+            ],
+            "ext": [],
+            "g_u": "2021060410240020",
+            "i": "https://static-cf-cn.doiting.com/storage/images/1e6b7bcb9bdb34538658b842d7872d9f.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/d27c16558632021f0a774fe5f14a35ad.png",
+                "n": "Single channel metering socket",
+                "url": "2021072815080038"
+              }
+            ],
+            "n": "Metering Socket",
+            "net": "02",
+            "p": "1",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "iAZkQk",
+            "s": 0,
+            "s_u": "2021070311510032"
           }
         ],
         "n": "Electrical"
