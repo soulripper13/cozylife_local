@@ -22074,6 +22074,49 @@
             "pid": "MMhHH5",
             "s": 0,
             "s_u": "2021121018070061"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              4,
+              6,
+              7,
+              8,
+              10,
+              11,
+              12,
+              13,
+              14,
+              16,
+              17,
+              18,
+              19
+            ],
+            "ext": [
+              "13"
+            ],
+            "g_u": "2021060316580018",
+            "i": "https://static-cf-cn.doiting.com/storage/images/88818ebc84ec76e5facc57ad243e3631.jpg",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/f4bd575998613643271fe413cb50cf81.jpg",
+                "n": "",
+                "url": "2026073011100005"
+              }
+            ],
+            "n": "E-Motorcycle Headlight",
+            "net": "01",
+            "p": "1",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "ztQXwe",
+            "s": 0,
+            "s_u": "2021062117130028"
           }
         ],
         "n": "Light"
@@ -34538,6 +34581,33 @@
             "pid": "K8KlSy",
             "s": 1,
             "s_u": "2023091511080155"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1
+            ],
+            "ext": [],
+            "g_u": "2026061719070006",
+            "i": "https://static-cf-cn.doiting.com/storage/images/72f952bfac1d0fb6eba6569ca750bb17.png",
+            "m_n": "^BWM-.{6}$",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/c9ebfd28cb1eae15b748fdd783d467e0.png",
+                "n": "",
+                "url": "2026061719070006"
+              }
+            ],
+            "n": "Carbugde",
+            "net": "01",
+            "p": "2",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "4I1Ez9",
+            "s": 0,
+            "s_u": "2026061719070006"
           }
         ],
         "n": "Outdoor Travel"
