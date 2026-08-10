@@ -22117,6 +22117,44 @@
             "pid": "ztQXwe",
             "s": 0,
             "s_u": "2021062117130028"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              13,
+              14
+            ],
+            "ext": [],
+            "g_u": "2021060515200021",
+            "i": "https://static-cf-cn.doiting.com/storage/images/1350b31c365939f9695923e029e76bc6.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/33b8ec4a24cf18d6c14c8cd1d669a4ac.png",
+                "n": "三路灯带_1",
+                "url": "2021121015310059"
+              }
+            ],
+            "n": "Rhythm light strip",
+            "net": "02",
+            "p": "1",
+            "p_c_d": null,
+            "p_p_p": null,
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "z0PTku",
+            "s": 0,
+            "s_u": "2021062311430029"
           }
         ],
         "n": "Light"
@@ -38112,6 +38150,38 @@
             "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "rRNT8C",
+            "s": 0,
+            "s_u": "2021070311260031"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              201,
+              202,
+              203
+            ],
+            "ext": [
+              "4",
+              "5"
+            ],
+            "g_u": "1",
+            "i": "https://static-cf-cn.doiting.com/storage/images/0933c65c25887908f60a4b33ac3e9c4c.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/2dc010316e1a81b337985555d9e94bbd.jpg",
+                "n": "",
+                "url": "2026080818430007"
+              }
+            ],
+            "n": "s3",
+            "net": "02",
+            "p": "3",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "0UhmjR",
             "s": 0,
             "s_u": "2021070311260031"
           }
