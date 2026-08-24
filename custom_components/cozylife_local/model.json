@@ -39,8 +39,8 @@
             "net": "00",
             "p": "1",
             "p_c_d": null,
-            "p_p_p": null,
-            "p_u": "https://api-us.doiting.com/web/pid/show_spec?pid=asdlks&lang=en",
+            "p_p_p": "Light",
+            "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "asdlks",
             "s": 1,
@@ -86,7 +86,7 @@
             "net": "00",
             "p": "1",
             "p_c_d": null,
-            "p_p_p": null,
+            "p_p_p": "Light",
             "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "kilulk",
@@ -115,27 +115,17 @@
             "m_n": "TT",
             "mp": [
               {
-                "i": "https://static-cf-cn.doiting.com/storage/images/51c13a616e1af3cf5b4b21b20afa9f8f.png",
-                "n": "DoHome Five-way Light Strip",
-                "url": "2020101401111009"
-              },
-              {
-                "i": "https://static-cf-cn.doiting.com/storage/images/8be8feac574f7b2799d2313595840e8a.png",
-                "n": "宝莲灯五路+音乐",
-                "url": "2020101401112009"
-              },
-              {
-                "i": "https://static-cf-cn.doiting.com/storage/images/fff0d4391dca90fc225e6b55b8b488ff.png",
-                "n": "DoHome五路+音乐_3",
-                "url": "2021030310310002"
+                "i": "https://static-cf-cn.doiting.com/storage/images/33b8ec4a24cf18d6c14c8cd1d669a4ac.png",
+                "n": "三路灯带_1",
+                "url": "2021121015310059"
               }
             ],
             "n": "Smart led Strip",
             "net": "00",
             "p": "1",
             "p_c_d": null,
-            "p_p_p": null,
-            "p_u": "https://api-us.doiting.com/web/pid/show_spec?pid=hjkhjk&lang=en",
+            "p_p_p": "Light",
+            "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "hjkhjk",
             "s": 1,
@@ -163,27 +153,17 @@
             "m_n": "TT",
             "mp": [
               {
-                "i": "https://static-cf-cn.doiting.com/storage/images/8be8feac574f7b2799d2313595840e8a.png",
-                "n": "宝莲灯五路+音乐",
-                "url": "2020101401112009"
-              },
-              {
-                "i": "https://static-cf-cn.doiting.com/storage/images/fff0d4391dca90fc225e6b55b8b488ff.png",
-                "n": "DoHome五路+音乐_3",
-                "url": "2021030310310002"
-              },
-              {
-                "i": "https://static-cf-cn.doiting.com/storage/images/51c13a616e1af3cf5b4b21b20afa9f8f.png",
-                "n": "DoHome Five-way Light Strip",
-                "url": "2020101401111009"
+                "i": "https://static-cf-cn.doiting.com/storage/images/33b8ec4a24cf18d6c14c8cd1d669a4ac.png",
+                "n": "三路灯带_1",
+                "url": "2021121015310059"
               }
             ],
             "n": "Smart led Strip",
             "net": "01",
             "p": "1",
             "p_c_d": null,
-            "p_p_p": null,
-            "p_u": "https://api-us.doiting.com/web/pid/show_spec?pid=y7274m&lang=en",
+            "p_p_p": "Light",
+            "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "y7274m",
             "s": 1,
@@ -223,8 +203,8 @@
             "net": "00",
             "p": "1",
             "p_c_d": null,
-            "p_p_p": null,
-            "p_u": "https://api-us.doiting.com/web/pid/show_spec?pid=k2ze18&lang=en",
+            "p_p_p": "Light",
+            "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "k2ze18",
             "s": 1,
@@ -265,8 +245,8 @@
             "net": "00",
             "p": "1",
             "p_c_d": null,
-            "p_p_p": null,
-            "p_u": "https://api-us.doiting.com/web/pid/show_spec?pid=d8oaf1&lang=en",
+            "p_p_p": "Light",
+            "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "d8oaf1",
             "s": 1,
@@ -991,8 +971,8 @@
             "net": "02",
             "p": "1",
             "p_c_d": null,
-            "p_p_p": null,
-            "p_u": "https://api-us.doiting.com/web/pid/show_spec?pid=z1o7zf&lang=en",
+            "p_p_p": "Light",
+            "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "z1o7zf",
             "s": 1,
@@ -4129,8 +4109,8 @@
             "net": "01",
             "p": "1",
             "p_c_d": null,
-            "p_p_p": null,
-            "p_u": "https://api-us.doiting.com/web/pid/show_spec?pid=v6thl0&lang=en",
+            "p_p_p": "Light",
+            "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "v6thl0",
             "s": 1,
@@ -4455,7 +4435,7 @@
             "net": "02",
             "p": "1",
             "p_c_d": null,
-            "p_p_p": null,
+            "p_p_p": "Light",
             "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "v7h57o",
@@ -4494,7 +4474,7 @@
             "net": "02",
             "p": "1",
             "p_c_d": null,
-            "p_p_p": null,
+            "p_p_p": "Light",
             "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "a2ya2z",
@@ -8324,8 +8304,8 @@
             "net": "02",
             "p": "1",
             "p_c_d": null,
-            "p_p_p": null,
-            "p_u": "https://api-us.doiting.com/web/pid/show_spec?pid=u5vlp7&lang=en",
+            "p_p_p": "Light",
+            "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "u5vlp7",
             "s": 1,
@@ -10252,8 +10232,8 @@
             "net": "01",
             "p": "1",
             "p_c_d": null,
-            "p_p_p": null,
-            "p_u": "https://api-us.doiting.com/web/pid/show_spec?pid=d5cri3&lang=en",
+            "p_p_p": "Light",
+            "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "d5cri3",
             "s": 1,
@@ -11117,7 +11097,7 @@
             "net": "02",
             "p": "1",
             "p_c_d": null,
-            "p_p_p": null,
+            "p_p_p": "Light",
             "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "d95f60",
@@ -12242,8 +12222,8 @@
             "net": "01",
             "p": "1",
             "p_c_d": null,
-            "p_p_p": null,
-            "p_u": "https://api-us.doiting.com/web/pid/show_spec?pid=DWbxuU&lang=en",
+            "p_p_p": "Light",
+            "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "DWbxuU",
             "s": 1,
@@ -22155,6 +22135,44 @@
             "pid": "z0PTku",
             "s": 0,
             "s_u": "2021062311430029"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              13,
+              14
+            ],
+            "ext": [],
+            "g_u": "2021060515200021",
+            "i": "https://static-cf-cn.doiting.com/storage/images/1350b31c365939f9695923e029e76bc6.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/33b8ec4a24cf18d6c14c8cd1d669a4ac.png",
+                "n": "三路灯带_1",
+                "url": "2021121015310059"
+              }
+            ],
+            "n": "Rhythm light strip",
+            "net": "02",
+            "p": "1",
+            "p_c_d": null,
+            "p_p_p": "LightStrip",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "qvnGI7",
+            "s": 0,
+            "s_u": "2021062311430029"
           }
         ],
         "n": "Light"
@@ -24882,8 +24900,8 @@
             "net": "02",
             "p": "1",
             "p_c_d": null,
-            "p_p_p": null,
-            "p_u": "https://api-us.doiting.com/web/pid/show_spec?pid=u8edjz&lang=en",
+            "p_p_p": "Socket",
+            "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "u8edjz",
             "s": 1,
@@ -32777,6 +32795,36 @@
             "pid": "iAZkQk",
             "s": 0,
             "s_u": "2021070311510032"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              3,
+              31
+            ],
+            "ext": [],
+            "g_u": "2021060410240020",
+            "i": "https://static-cf-cn.doiting.com/storage/images/e97797188459ea22bdbe32ed894e2245.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/e41bae463a8a6695f6defeea07dbe4ba.png",
+                "n": "Single-way Socket",
+                "url": "2020101401120009"
+              }
+            ],
+            "n": "Smart Switch",
+            "net": "02",
+            "p": "1",
+            "p_c_d": null,
+            "p_p_p": null,
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "evnKpa",
+            "s": 0,
+            "s_u": "2021070311510032"
           }
         ],
         "n": "Electrical"
@@ -34559,7 +34607,7 @@
             "net": "01",
             "p": "2",
             "p_c_d": null,
-            "p_p_p": "Placeholder",
+            "p_p_p": "Light",
             "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "VlBduH",
@@ -35017,7 +35065,7 @@
               "report_interval": "3600",
               "report_interval_dpid": "14"
             },
-            "p_p_p": null,
+            "p_p_p": "Light",
             "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "s1AxFq",
@@ -35052,7 +35100,7 @@
             "p_c_d": {
               "report_interval": "28800"
             },
-            "p_p_p": null,
+            "p_p_p": "Light",
             "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "kOTYxo",
