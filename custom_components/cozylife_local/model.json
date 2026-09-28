@@ -22220,7 +22220,7 @@
                 "url": "2026091419000001"
               }
             ],
-            "n": "Obd",
+            "n": "OBDLink",
             "net": "01",
             "p": "2",
             "p_c_d": null,
@@ -22230,6 +22230,50 @@
             "pid": "Hg4d7S",
             "s": 0,
             "s_u": "2026091419000001"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19
+            ],
+            "ext": [],
+            "g_u": "2021060316580018",
+            "i": "https://static-cf-cn.doiting.com/storage/images/cdc11297e002a7527f80cb2a267d0201.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/a39720bc147cab9f3ad7f01905b9137b.png",
+                "n": "",
+                "url": "2026092310000000"
+              }
+            ],
+            "n": "Symphony light strip",
+            "net": "02",
+            "p": "1",
+            "p_c_d": null,
+            "p_p_p": "Light",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "SMyw4R",
+            "s": 0,
+            "s_u": "2021062117130028"
           }
         ],
         "n": "Light"
@@ -32920,6 +32964,44 @@
             "pid": "Tb8f45",
             "s": 0,
             "s_u": "2021070311510032"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              3,
+              18,
+              19,
+              20,
+              21,
+              23,
+              24,
+              25
+            ],
+            "ext": [
+              "3"
+            ],
+            "g_u": "2021060410240020",
+            "i": "https://static-cf-cn.doiting.com/storage/images/6fdcfdb73368930595d5290eca1e32c0.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/505480a254e8ea1cd934a64a52ab776d.png",
+                "n": "",
+                "url": "2026092217380009"
+              }
+            ],
+            "n": "Face Recognition",
+            "net": "02",
+            "p": "1",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "brWecS",
+            "s": 0,
+            "s_u": "2021070311510032"
           }
         ],
         "n": "Electrical"
@@ -38555,6 +38637,57 @@
             "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "ZhTBTj",
+            "s": 0,
+            "s_u": "2021070311260031"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25
+            ],
+            "ext": [],
+            "g_u": "2026032615520245",
+            "i": "https://static-cf-cn.doiting.com/storage/images/205b77b8b8c651ab60bc976b2b8b76d2.png",
+            "m_n": "^X7SPK1$",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/17f61de122da7166c57190c691d72a10.jpg",
+                "n": "",
+                "url": "2026092220070010"
+              }
+            ],
+            "n": "X7 BLE",
+            "net": "01",
+            "p": "2",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "x0VKNx",
             "s": 0,
             "s_u": "2021070311260031"
           }
