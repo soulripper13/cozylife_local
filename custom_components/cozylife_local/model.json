@@ -22211,11 +22211,11 @@
               "5"
             ],
             "g_u": "2026091419000001",
-            "i": "https://static-cf-cn.doiting.com/storage/images/5ca99ae629a65ad8a6048a19ec2fc5db.png",
+            "i": "https://static-cf-cn.doiting.com/storage/images/6c484b5a39ffb406fb8896a6fc4740ff.png",
             "m_n": "^.*(?i)obd.*$",
             "mp": [
               {
-                "i": "https://static-cf-cn.doiting.com/storage/images/ac65adb81158c82b884f30939a3c5a2b.png",
+                "i": "https://static-cf-cn.doiting.com/storage/images/8da68fbfc5977bd98720ea4cfea6bbf0.png",
                 "n": "",
                 "url": "2026091419000001"
               }
@@ -33780,6 +33780,37 @@
             "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "7khgFV",
+            "s": 0,
+            "s_u": "2021070311260031"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              2
+            ],
+            "ext": [
+              "4",
+              "5",
+              "13"
+            ],
+            "g_u": "1",
+            "i": "https://static-cf-cn.doiting.com/storage/images/ec9456e001ac8fceab52e6cd06f82b13.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/16846399a72eef6af54c6ca6bd0f2192.png",
+                "n": "",
+                "url": "2026092915120010"
+              }
+            ],
+            "n": "E-ink Display",
+            "net": "01",
+            "p": "3",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "9BNTvD",
             "s": 0,
             "s_u": "2021070311260031"
           }
