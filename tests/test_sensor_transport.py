@@ -257,6 +257,61 @@ def test_persistent_transport_preserves_existing_info_state_and_set_commands() -
     asyncio.run(exercise())
 
 
+def test_request_sequence_numbers_are_unique_within_one_millisecond() -> None:
+    """Concurrent pending requests must never share the reply correlation key."""
+    _load_api()
+    from cozylife_local import cozylife_api
+
+    original_time = cozylife_api.time.time
+    original_last_sn = cozylife_api._last_sn
+    try:
+        cozylife_api.time.time = lambda: 1_700_000_000.0
+        cozylife_api._last_sn = 0
+        sequence_numbers = [cozylife_api._get_sn() for _ in range(3)]
+    finally:
+        cozylife_api.time.time = original_time
+        cozylife_api._last_sn = original_last_sn
+
+    assert sequence_numbers == ["1700000000000", "1700000000001", "1700000000002"]
+
+
+def test_state_request_reconnects_after_a_response_timeout() -> None:
+    """A timed-out persistent request does not leave a stale socket in use."""
+    CozyLifeDevice = _load_api()
+
+    async def exercise() -> None:
+        connections = 0
+
+        async def handler(reader, writer) -> None:
+            nonlocal connections
+            connections += 1
+            request = json.loads((await reader.readline()).decode())
+            if connections == 1:
+                await asyncio.sleep(0.15)
+                return
+            writer.write(
+                (json.dumps({
+                    "sn": request["sn"],
+                    "res": 0,
+                    "msg": {"data": {"1": True}},
+                }) + "\r\n").encode()
+            )
+            await writer.drain()
+
+        server = await asyncio.start_server(handler, "127.0.0.1", 5555)
+        device = CozyLifeDevice("127.0.0.1", timeout=0.05)
+        try:
+            assert await device.async_get_state() is None
+            assert await device.async_get_state() == {"1": True}
+            assert connections == 2
+        finally:
+            await device.async_close()
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(exercise())
+
+
 def test_coordinator_publishes_partial_inbound_reports_without_a_refresh() -> None:
     """An unsolicited device report updates only the DPIDs it contains."""
     CozyLifeCoordinator = _load_coordinator()

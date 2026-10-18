@@ -19,6 +19,7 @@ CMD_INFO = 0
 CMD_QUERY = 2
 CMD_SET = 3
 DPID_QUERY_ATTEMPTS = 3
+_last_sn = 0
 
 
 class _CozyLifeDiscoveryProtocol(asyncio.DatagramProtocol):
@@ -131,8 +132,11 @@ class CozyLifeUdpDiscovery:
 
 
 def _get_sn() -> str:
-    """Generates a unique sequence number based on current timestamp."""
-    return str(int(time.time() * 1000))
+    """Generate a unique, numeric sequence number for request correlation."""
+    global _last_sn
+    timestamp_ms = int(time.time() * 1000)
+    _last_sn = max(timestamp_ms, _last_sn + 1)
+    return str(_last_sn)
 
 class CozyLifeDevice:
     """Represents a CozyLife device and handles its TCP communication."""
@@ -326,6 +330,10 @@ class CozyLifeDevice:
                 return await asyncio.wait_for(asyncio.shield(response), timeout=self._timeout)
             except asyncio.TimeoutError:
                 _LOGGER.warning("Timeout waiting for response with sn %s from %s", sent_sn, self._ip_address)
+                # A persistent socket whose peer stopped answering is not a
+                # usable transport for the next request.  Discard it so the
+                # next attempt performs a clean local reconnect.
+                self._disconnect()
                 return None
             finally:
                 self._pending_responses.pop(sent_sn, None)
