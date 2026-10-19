@@ -32,4 +32,4 @@ jobs:
         uses: github/codeql-action/autobuild@f051dc808ef3645eb0d08647ec751634ec2304ac # v3
 
       - name: Analyze
-        uses: github/codeql-action/analyze@f051dc808ef3645eb0d08647ec751634ec2304ac # v3
+        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v3
