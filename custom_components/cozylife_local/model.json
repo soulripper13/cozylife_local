@@ -21753,7 +21753,7 @@
             "ext": [],
             "g_u": "2021121815080062",
             "i": "https://static-cf-cn.doiting.com/storage/images/f5ea00756095e94ec173c3658d94cc2d.png",
-            "m_n": "^HTX-.*$",
+            "m_n": "^HTX-.{6}$",
             "mp": [
               {
                 "i": "https://static-cf-cn.doiting.com/storage/images/483391231fabe7297e5a9c284e46a45f.jpg",
