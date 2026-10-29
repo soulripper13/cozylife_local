@@ -45,6 +45,7 @@ We are still looking for reports to expand coverage for:
 ## Key Features
 
 *   ⚡ **100% Local Control**: Zero reliance on the CozyLife cloud. All control commands and sensor status requests happen locally over your Wi-Fi network.
+*   📶 **Powered-Device Availability**: Supported powered devices are checked locally in the background and become unavailable after a physical power cut when they no longer respond. Normal controls remain independent of that background check.
 *   🔌 **Automatic Local Discovery**: One submitted CozyLife Local entry runs a shared UDP/6095 listener and sends APK-style `cmd:0` discovery broadcasts every 10 seconds. Home Assistant presents each newly announced device through its normal discovered-device card.
 *   ⏱️ **Sleeping Sensor Wake Windows**: Supported sleeping temperature/humidity sensors use separate local status probes every 250 ms. This is independent of UDP discovery and is an attempt cadence—not a claim about the device's wake or reporting schedule.
 *   📍 **Resilient Local Addressing**: Each device exposes its local IP diagnostically, and the shared listener refreshes known device addresses from APK-style announcements.

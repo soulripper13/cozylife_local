@@ -116,6 +116,10 @@ Multi-gang devices (such as double or triple rocker wall switches) share a singl
 *   **Individual Entities**: Home Assistant will create a distinct switch entity for each gang (e.g., `Switch 1`, `Switch 2`). You can rename these individually in the Home Assistant UI without losing local link stability.
 *   **Switch Options**: When the device reports the required DPIDs, the integration exposes Power-on State (`DPID 18`) and LED Status (`DPID 19`).
 
+### Powered-Device Availability
+
+Supported powered devices are checked locally in the background. If a light, plug, or switch loses physical power and no longer responds to its local connection, Home Assistant marks its entities unavailable after the next failed health check. This is distinct from normal control: turning a device on or off does not wait behind the background availability check.
+
 ---
 
 ### Smart Plugs & Power Monitoring Outlets
