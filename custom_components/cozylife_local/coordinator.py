@@ -28,9 +28,16 @@ _LOGGER = logging.getLogger(__name__)
 _UPDATE_LOGGER = logging.getLogger(f"{__name__}.updates")
 _UPDATE_LOGGER.setLevel(logging.INFO)
 
-# These are local attempt bounds, not a claimed sensor wake or report schedule.
+# This only bounds one TCP connection attempt. It is not a sensor wake or
+# report schedule.
 SENSOR_CONNECT_TIMEOUT_SECONDS = 0.2
-SENSOR_WAKE_PROBE_INTERVAL_SECONDS = 0.25
+# A Home Assistant-side retry cadence for the same local ``cmd:2 / attr:[1]``
+# request used by the APK's device screen. It is deliberately independent of
+# UDP discovery: the APK's ten-second broadcast/cache lifecycle is an app
+# address-routing mechanism, not evidence that a battery sensor's TCP window
+# only exists immediately after an announcement. Status writes are serialized
+# by CozyLifeDevice, so this never overlaps another status write.
+SENSOR_STATUS_ATTEMPT_INTERVAL_SECONDS = 0.25
 POWERED_DEVICE_AVAILABILITY_INTERVAL = timedelta(seconds=30)
 # The APK uses a one-second TCP connection allowance. Apply that bound only
 # to background health work; interactive commands keep the device's normal
@@ -59,11 +66,13 @@ def _is_valid_environment_measurement(
     zero_is_placeholder: bool,
 ) -> bool:
     """Return whether a temperature/humidity reading looks like a real report."""
-    if not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
 
-    # Sleeping environment sensors can intermittently report 0 while waking.
-    # Treat that as a placeholder so Home Assistant does not record false spikes.
+    # Compatibility guard for the false-zero reports documented in issue #7.
+    # The APK displays zero, but the historical report has no raw frame that
+    # distinguishes its false values from legitimate zero measurements.
+    # Preserve released behavior until that distinction is evidenced.
     if zero_is_placeholder and value == 0:
         return False
 
@@ -71,7 +80,7 @@ def _is_valid_environment_measurement(
         return -400 <= value <= 800
 
     if dpid == SENSOR_HUMIDITY:
-        return 0 < value <= 100
+        return 0 <= value <= 100
 
     return True
 
@@ -115,14 +124,19 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             config_entry=entry,
         )
         self.device = device
-        self._sensor_probe_task: asyncio.Task[None] | None = None
+        self._sensor_status_task: asyncio.Task[None] | None = None
         self._identity_refresh_task: asyncio.Task[None] | None = None
         self._powered_followup_task: asyncio.Task[None] | None = None
+        self._closed = False
         if self._uses_sensor_polling:
-            # Bound a failed local attempt so a sleeping device cannot consume
-            # the next half-second wake-window attempt.
+            # A sleeping device must not let one unsuccessful local connection
+            # monopolize the transport when its next UDP presence announcement
+            # arrives.
             self.device.set_timeout(SENSOR_CONNECT_TIMEOUT_SECONDS)
-
+            # Linux must expire unacknowledged writes to a sleeping peer;
+            # drain() alone can buffer requests for minutes on a stale socket.
+            # This does not expire an ACKed connection awaiting measurements.
+            self.device.set_tcp_user_timeout(1000)
         # The APK routes every valid local TCP frame to the device listener by
         # the socket's local address.  Do the same for powered devices as
         # well as sleeping sensors: some valid state reports are asynchronous
@@ -131,24 +145,37 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._entry = entry
 
     async def async_start_discovery(self) -> None:
-        """Start local wake-window attempts for a configured sensor entry.
+        """Start independent UDP discovery and serialized sensor requests.
 
-        The sensor firmware controls when it wakes and reports. This task only
-        keeps a lightweight local status request available at a fixed host-side
-        cadence; it does not infer any sensor reporting interval.
+        The APK daemon broadcasts command 0 every ten seconds to keep its own
+        address cache current. The configured HA entry also keeps the APK's
+        status request available at a bounded local cadence: a sleeping sensor
+        controls when it accepts the request, so an app-side cache update must
+        not be treated as the sole opportunity to read it.
         """
-        if self._uses_sensor_polling and self._sensor_probe_task is None:
-            self._sensor_probe_task = self.hass.async_create_background_task(
-                self._async_probe_sensor_wake_window(),
-                "cozylife sensor wake-window probing",
-            )
+        if getattr(self, "_closed", False):
+            return
+        if self._uses_sensor_polling:
+            await async_get_background_discovery(self.hass)
+            if getattr(self, "_closed", False):
+                return
+            if self._sensor_status_task is None:
+                self._sensor_status_task = self.hass.async_create_background_task(
+                    self._async_request_sensor_status(),
+                    "cozylife sensor status requests",
+                )
 
-    async def _async_probe_sensor_wake_window(self) -> None:
-        """Issue one serialized local status request every half second."""
+    async def _async_request_sensor_status(self) -> None:
+        """Keep one non-overlapping local status request available per interval.
+
+        A completed write is transport activity only. Actual measurements are
+        published exclusively by ``_async_handle_device_message`` after a
+        frame contains a valid temperature or humidity DPID.
+        """
         while True:
             started = self.hass.loop.time()
             await self.device.async_send_status()
-            remaining = SENSOR_WAKE_PROBE_INTERVAL_SECONDS - (
+            remaining = SENSOR_STATUS_ATTEMPT_INTERVAL_SECONDS - (
                 self.hass.loop.time() - started
             )
             if remaining > 0:
@@ -156,6 +183,8 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_handle_discovered_address(self, ip_address: str) -> None:
         """Use an APK discovery reply to refresh this entry's local address."""
+        if getattr(self, "_closed", False):
+            return
         moved = await self.device.async_update_ip_address(ip_address)
         if moved:
             self.hass.config_entries.async_update_entry(
@@ -163,11 +192,9 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 data={**self._entry.data, "ip_address": ip_address},
             )
         if self._uses_sensor_polling:
-            # The APK gates a separately queued local status action on its UDP
-            # cache. Home Assistant has no app UI refresh event, so issue one
-            # serialized cmd-2 status write only after a matching configured
-            # device answers discovery. This preserves the local gated path
-            # without a synthetic high-frequency polling loop.
+            # Preserve the app's opportunistic cache-to-writer path as an
+            # additional immediate attempt. The entry's independent status
+            # task remains responsible for retrying between announcements.
             await self.device.async_send_status()
             return
         # The APK's Wi-Fi writer queues a local cmd-2 request only after the
@@ -281,13 +308,22 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_close(self) -> None:
         """Release the device reader owned by this config entry."""
-        if self._sensor_probe_task:
-            self._sensor_probe_task.cancel()
+        self._closed = True
+        followup = getattr(self, "_powered_followup_task", None)
+        if followup is not None:
+            followup.cancel()
             try:
-                await self._sensor_probe_task
+                await followup
             except asyncio.CancelledError:
                 pass
-            self._sensor_probe_task = None
+            self._powered_followup_task = None
+        if self._sensor_status_task:
+            self._sensor_status_task.cancel()
+            try:
+                await self._sensor_status_task
+            except asyncio.CancelledError:
+                pass
+            self._sensor_status_task = None
         if self._identity_refresh_task:
             self._identity_refresh_task.cancel()
             try:
@@ -299,15 +335,55 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_handle_device_message(self, frame: dict[str, Any]) -> None:
         """Publish a sensor report received by the persistent device reader."""
+        if getattr(self, "_closed", False):
+            return
         message = frame.get("msg", frame)
+        if frame.get("res", 0) != 0:
+            return
         state_data = message.get("data") if isinstance(message, dict) else None
         if not isinstance(state_data, dict):
             return
 
         received_state = {str(dpid): value for dpid, value in state_data.items()}
+        if self._uses_sensor_polling:
+            from .measurement_filter import MeasurementFilter
+
+            options = getattr(getattr(self, "_entry", None), "options", {})
+            # Keep released zero handling unless explicitly opting into the
+            # median filter, which treats zero like any other numeric sample.
+            enabled = options.get("filter_outliers", False)
+            received_state = {
+                key: value for key, value in received_state.items()
+                if key not in ENVIRONMENT_SENSOR_MEASUREMENTS
+                or _is_valid_environment_measurement(key, value, zero_is_placeholder=not enabled)
+            }
+            if enabled:
+                if not hasattr(self, "_measurement_filter"):
+                    self._measurement_filter = MeasurementFilter()
+                received_state = self._measurement_filter.filter(
+                    frame.get("sn"), received_state,
+                    {SENSOR_TEMPERATURE: options.get("temperature_radius", 2.0) * 10,
+                     SENSOR_HUMIDITY: options.get("humidity_radius", 10.0)},
+                )
         if self._uses_sensor_polling and not self._has_valid_environment_measurements(
             received_state
         ):
+            measurement_diagnostics = {
+                dpid: {
+                    "present": dpid in received_state,
+                    "type": type(received_state.get(dpid)).__name__,
+                    "valid": _is_valid_environment_measurement(
+                        dpid,
+                        received_state.get(dpid),
+                        zero_is_placeholder=False,
+                    ),
+                }
+                for dpid in ENVIRONMENT_SENSOR_MEASUREMENTS
+            }
+            _LOGGER.debug(
+                "Ignoring local environment report with invalid measurements: %s",
+                measurement_diagnostics,
+            )
             return
 
         # Device state reports can be partial.  The APK delivers them to the
@@ -401,14 +477,14 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if _is_valid_environment_measurement(
                 dpid,
                 current,
-                zero_is_placeholder=True,
+                zero_is_placeholder=False,
             ):
                 continue
 
             if _is_valid_environment_measurement(
                 dpid,
                 previous,
-                zero_is_placeholder=True,
+                zero_is_placeholder=False,
             ):
                 sanitized[dpid] = previous
                 _LOGGER.debug(
@@ -433,7 +509,7 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _is_valid_environment_measurement(
                 dpid,
                 state_data.get(dpid),
-                zero_is_placeholder=True,
+                zero_is_placeholder=False,
             )
             for dpid in ENVIRONMENT_SENSOR_MEASUREMENTS
         )
@@ -449,7 +525,7 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # The APK queues ``attr:[0]`` as a local write and routes a later
         # state frame to the device listener; it does not make this command
         # contingent on a correlated or immediate state reply. Its short-lived
-        # UDP cache is an app-side address-routing mechanism, not device
+        # UDP cache is only an app-side address-routing mechanism, not device
         # availability evidence: powered products can accept the local TCP
         # request while answering discovery only intermittently. A successful
         # TCP connect and completed local write therefore proves availability;

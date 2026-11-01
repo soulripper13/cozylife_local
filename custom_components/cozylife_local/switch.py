@@ -28,7 +28,7 @@ async def async_setup_entry(
     coordinator: CozyLifeCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
     if not coordinator.device.dpid:
-        _LOGGER.error(f"Missing DPID list for {coordinator.device.ip_address}. Cannot set up switch.")
+        _LOGGER.error("Missing DPID list. Cannot set up switch.")
         return
 
     dpids = supported_dpids(coordinator)

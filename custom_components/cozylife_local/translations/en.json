@@ -23,11 +23,15 @@
         "description": "Tune local parameters and logging options for this CozyLife device.",
         "data": {
           "enable_debug": "Enable verbose integration debug logs",
+          "filter_outliers": "Filter temperature and humidity outliers",
+          "temperature_radius": "Temperature outlier radius (°C)",
+          "humidity_radius": "Humidity outlier radius (percentage points)",
           "max_kelvin": "Maximum Kelvin (Cool White)",
           "min_kelvin": "Minimum Kelvin (Warm White)"
         },
         "data_description": {
           "enable_debug": "Logs safe protocol summaries and DPID names for diagnosing local transport or entity-mapping problems. It omits local identity and raw state values.",
+          "filter_outliers": "Optional four-sample median filter. Rejected samples advance the window so sustained changes are eventually accepted. Duplicate or unidentified reports do not advance it. Disabled retains the existing zero safeguard.",
           "min_kelvin": "Adjust the warmest color temperature limit (Kelvin) for this light bulb.",
           "max_kelvin": "Adjust the coolest color temperature limit (Kelvin) for this light bulb."
         }

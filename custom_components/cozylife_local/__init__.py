@@ -165,11 +165,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if entry.data.get("entry_type") == DISCOVERY_CONTROLLER_ENTRY_TYPE:
         return True
 
-    await async_load_model_catalog(hass)
-    ip_address = entry.data["ip_address"]
+    device = None
+    try:
+        await async_load_model_catalog(hass)
+        device = CozyLifeDevice(entry.data["ip_address"])
+        return await _async_setup_device_entry(hass, entry, device, discovery)
+    except BaseException:
+        coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
+        if discovery is not None and device is not None:
+            if device.device_id:
+                discovery.unregister_device(device.device_id, entry.entry_id)
+            discovery.unregister_address(entry.data.get("ip_address", ""))
+        if coordinator is not None:
+            await coordinator.async_close()
+        elif device is not None:
+            await device.async_close()
+        _remove_debug_entry(hass, entry.entry_id)
+        raise
 
-    # Create a CozyLifeDevice instance for this entry
-    device = CozyLifeDevice(ip_address)
+
+async def _async_setup_device_entry(hass, entry, device, discovery) -> bool:
+    """Set up device resources under the caller's failure-cleanup boundary."""
+    ip_address = entry.data["ip_address"]
 
     # Restore only facts previously obtained for this config entry. This lets a
     # sleeping device start without a synchronous reply, without turning the
@@ -186,11 +203,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             cached_dtp,
             [str(dpid) for dpid in cached_dpids],
         )
-        _LOGGER.debug(f"Restored device info for {ip_address} from cache.")
+        _LOGGER.debug("Restored device info from cache.")
     else:
         # No cache — must contact device (first-time setup)
         if not await device.async_update_device_info():
-            _LOGGER.error(f"Failed to get full device information for {ip_address}")
+            _LOGGER.error("Failed to get full device information")
+            await device.async_close()
+            _remove_debug_entry(hass, entry.entry_id)
             return False
         # Save discovered info into config entry for future restarts
         hass.config_entries.async_update_entry(entry, data={
@@ -203,6 +222,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Create a coordinator for this device
     coordinator = CozyLifeCoordinator(hass, device, entry)
+    hass.data[DOMAIN][entry.entry_id] = coordinator
     if discovery is not None and device.device_id:
         discovery.register_device(
             device.device_id,

@@ -197,6 +197,11 @@ class CozyLifeOptionsFlow(config_entries.OptionsFlow):
         is_light = classification.is_light
 
         schema_fields: Dict[Any, Any] = {}
+        if classification.is_environment_sensor:
+            options = self._config_entry.options
+            schema_fields[vol.Optional("filter_outliers", default=options.get("filter_outliers", False))] = bool
+            schema_fields[vol.Optional("temperature_radius", default=options.get("temperature_radius", 2.0))] = vol.All(vol.Coerce(float), vol.Range(min=0.1, max=120))
+            schema_fields[vol.Optional("humidity_radius", default=options.get("humidity_radius", 10.0))] = vol.All(vol.Coerce(float), vol.Range(min=0.1, max=100))
         if is_light:
             model_min_kelvin, model_max_kelvin = _kelvin_range_for_pid(pid)
             stored_min_kelvin = self._config_entry.data.get("min_kelvin", DEFAULT_MIN_KELVIN)

@@ -331,7 +331,10 @@ class CozyLifeSensorBase(
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        if (value := self._native_value_from_data()) is not None:
+        if (
+            (value := self._native_value_from_data()) is not None
+            and self._is_valid_native_value(value)
+        ):
             self._last_valid_native_value = value
         self.async_write_ha_state()
 
@@ -347,9 +350,15 @@ class CozyLifeSensorBase(
             return
 
         try:
-            self._last_valid_native_value = float(last_state.state)
+            restored_value = float(last_state.state)
         except (TypeError, ValueError):
             return
+        if self._is_valid_native_value(restored_value):
+            self._last_valid_native_value = restored_value
+
+    def _is_valid_native_value(self, value: float) -> bool:
+        """Return whether a restored value is safe to present as a sensor state."""
+        return True
 
     def _native_value_from_data(self) -> Optional[float]:
         """Return the current native value from coordinator data."""
@@ -358,7 +367,7 @@ class CozyLifeSensorBase(
     @property
     def native_value(self) -> Optional[float]:
         value = self._native_value_from_data()
-        if value is not None:
+        if value is not None and self._is_valid_native_value(value):
             self._last_valid_native_value = value
             return value
 
@@ -371,6 +380,10 @@ class CozyLifeTemperatureSensor(CozyLifeSensorBase):
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    # A sleeping sensor can deliver a real report whose rounded value is the
+    # same as the preceding one. Keep it observable in HA history instead of
+    # treating it as if no report arrived.
+    _attr_force_update = True
 
     def __init__(self, coordinator: CozyLifeCoordinator, entry: ConfigEntry):
         super().__init__(coordinator, entry, "temperature")
@@ -382,6 +395,10 @@ class CozyLifeTemperatureSensor(CozyLifeSensorBase):
             return None
         return round(raw / 10, 1)
 
+    def _is_valid_native_value(self, value: float) -> bool:
+        """Reject non-measurement values from malformed local sensor frames."""
+        return -40.0 <= value <= 80.0
+
 
 class CozyLifeHumiditySensor(CozyLifeSensorBase):
     """Humidity sensor entity."""
@@ -389,6 +406,9 @@ class CozyLifeHumiditySensor(CozyLifeSensorBase):
     _attr_device_class = SensorDeviceClass.HUMIDITY
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = PERCENTAGE
+    # See CozyLifeTemperatureSensor: unchanged reported measurements are still
+    # real sensor reports and should update their report timestamp.
+    _attr_force_update = True
 
     def __init__(self, coordinator: CozyLifeCoordinator, entry: ConfigEntry):
         super().__init__(coordinator, entry, "humidity")
@@ -399,6 +419,10 @@ class CozyLifeHumiditySensor(CozyLifeSensorBase):
         if raw is None:
             return None
         return float(raw)
+
+    def _is_valid_native_value(self, value: float) -> bool:
+        """Reject non-measurement values from malformed local sensor frames."""
+        return 0.0 <= value <= 100.0
 
 
 class CozyLifeBatterySensor(CozyLifeSensorBase):

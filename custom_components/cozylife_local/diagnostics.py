@@ -29,6 +29,8 @@ async def async_get_config_entry_diagnostics(
     return {
         "entry": _redact_entry(dict(entry.data)),
         "transport": {
+            "connected_meaning": "Local socket is open; this does not confirm device responsiveness",
+            "last_frame_received_at": getattr(device, "last_frame_received_at", None),
             "connected": bool(
                 device is not None
                 and getattr(device, "is_connected", False)
