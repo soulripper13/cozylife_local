@@ -1624,7 +1624,7 @@ def test_powered_device_keeps_periodic_availability_refresh() -> None:
 
 
 def test_powered_refresh_uses_the_apk_listener_path() -> None:
-    """A powered refresh writes attr:[0] and keeps the listener-owned state."""
+    """A powered refresh writes attr:[0] without using UDP as availability."""
     CozyLifeCoordinator = _load_coordinator()
 
     async def exercise() -> None:
@@ -1646,12 +1646,8 @@ def test_powered_refresh_uses_the_apk_listener_path() -> None:
         )
         coordinator.data = {"1": True, "28": 12}
 
-        class Discovery:
-            def is_device_present(self, _device_id, _ip_address):
-                return True
-
         async def get_discovery(_hass):
-            return Discovery()
+            raise AssertionError("powered availability must not depend on UDP presence")
 
         coordinator_module = sys.modules["cozylife_local.coordinator"]
         with patch.object(
@@ -1663,20 +1659,20 @@ def test_powered_refresh_uses_the_apk_listener_path() -> None:
     asyncio.run(exercise())
 
 
-def test_powered_refresh_requires_fresh_apk_udp_presence() -> None:
-    """The availability timer cannot bypass the APK's UDP presence gate."""
+def test_powered_refresh_marks_unavailable_only_when_its_local_request_fails() -> None:
+    """A stale UDP announcement cannot fail an otherwise reachable product."""
     CozyLifeCoordinator = _load_coordinator()
 
     async def exercise() -> None:
         coordinator = object.__new__(CozyLifeCoordinator)
         coordinator._uses_sensor_polling = False
         coordinator.hass = object()
-        requested = False
+        requested = 0
 
         async def async_request_properties(*, timeout: float | None = None) -> bool:
             nonlocal requested
             assert timeout == 1.0
-            requested = True
+            requested += 1
             return False
 
         coordinator.device = types.SimpleNamespace(
@@ -1685,12 +1681,8 @@ def test_powered_refresh_requires_fresh_apk_udp_presence() -> None:
             async_request_properties=async_request_properties,
         )
 
-        class Discovery:
-            def is_device_present(self, _device_id, _ip_address):
-                return False
-
         async def get_discovery(_hass):
-            return Discovery()
+            raise AssertionError("powered availability must not depend on UDP presence")
 
         coordinator_module = sys.modules["cozylife_local.coordinator"]
         with patch.object(
@@ -1699,10 +1691,10 @@ def test_powered_refresh_requires_fresh_apk_udp_presence() -> None:
             try:
                 await coordinator._async_get_local_state()
             except RuntimeError as err:
-                assert str(err) == "CozyLife device is not present on local UDP"
+                assert str(err) == "Failed to request state from CozyLife device"
             else:
-                raise AssertionError("Stale UDP presence must fail refresh")
-        assert requested is False
+                raise AssertionError("A failed local request must fail refresh")
+        assert requested == 1
 
     asyncio.run(exercise())
 

@@ -446,18 +446,16 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise UpdateFailed("Failed to query state from CozyLife device")
             return state_data
 
-        discovery = await async_get_background_discovery(self.hass)
-        if not discovery.is_device_present(
-            self.device.device_id, self.device.ip_address
-        ):
-            raise UpdateFailed("CozyLife device is not present on local UDP")
-
         # The APK queues ``attr:[0]`` as a local write and routes a later
         # state frame to the device listener; it does not make this command
-        # contingent on a correlated or immediate state reply. UDP presence
-        # is the availability evidence here. Waiting for a state frame was
-        # introduced in 1.1.3 and can hold the shared writer lock long enough
-        # to delay a user control command.
+        # contingent on a correlated or immediate state reply. Its short-lived
+        # UDP cache is an app-side address-routing mechanism, not device
+        # availability evidence: powered products can accept the local TCP
+        # request while answering discovery only intermittently. A successful
+        # TCP connect and completed local write therefore proves availability;
+        # a failed local request makes the entity unavailable. Waiting for a
+        # state frame was introduced in 1.1.3 and can hold the shared writer
+        # lock long enough to delay a user control command.
         if not await self.device.async_request_properties(
             timeout=POWERED_DEVICE_AVAILABILITY_TIMEOUT_SECONDS
         ):
