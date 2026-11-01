@@ -62,18 +62,9 @@ PLUG_METERING_FOLLOWUP_DPIDS = (
 def _is_valid_environment_measurement(
     dpid: str,
     value: Any,
-    *,
-    zero_is_placeholder: bool,
 ) -> bool:
     """Return whether a temperature/humidity reading looks like a real report."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return False
-
-    # Compatibility guard for the false-zero reports documented in issue #7.
-    # The APK displays zero, but the historical report has no raw frame that
-    # distinguishes its false values from legitimate zero measurements.
-    # Preserve released behavior until that distinction is evidenced.
-    if zero_is_placeholder and value == 0:
         return False
 
     if dpid == SENSOR_TEMPERATURE:
@@ -349,13 +340,13 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             from .measurement_filter import MeasurementFilter
 
             options = getattr(getattr(self, "_entry", None), "options", {})
-            # Keep released zero handling unless explicitly opting into the
-            # median filter, which treats zero like any other numeric sample.
+            # Valid zero measurements pass through unless the optional filter
+            # identifies them as outliers, just like any other numeric sample.
             enabled = options.get("filter_outliers", False)
             received_state = {
                 key: value for key, value in received_state.items()
                 if key not in ENVIRONMENT_SENSOR_MEASUREMENTS
-                or _is_valid_environment_measurement(key, value, zero_is_placeholder=not enabled)
+                or _is_valid_environment_measurement(key, value)
             }
             if enabled:
                 if not hasattr(self, "_measurement_filter"):
@@ -375,7 +366,6 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "valid": _is_valid_environment_measurement(
                         dpid,
                         received_state.get(dpid),
-                        zero_is_placeholder=False,
                     ),
                 }
                 for dpid in ENVIRONMENT_SENSOR_MEASUREMENTS
@@ -477,14 +467,12 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if _is_valid_environment_measurement(
                 dpid,
                 current,
-                zero_is_placeholder=False,
             ):
                 continue
 
             if _is_valid_environment_measurement(
                 dpid,
                 previous,
-                zero_is_placeholder=False,
             ):
                 sanitized[dpid] = previous
                 _LOGGER.debug(
@@ -509,7 +497,6 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _is_valid_environment_measurement(
                 dpid,
                 state_data.get(dpid),
-                zero_is_placeholder=False,
             )
             for dpid in ENVIRONMENT_SENSOR_MEASUREMENTS
         )

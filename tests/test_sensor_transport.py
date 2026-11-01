@@ -104,7 +104,9 @@ def test_optional_filter_receive_path_defaults_off_and_rejects_replay():
                            ("2", {"8": 0}), ("3", {"8": 240})):
             await coordinator._async_handle_device_message(
                 {"cmd": 10, "sn": sn, "msg": {"data": values}})
-        assert len(updates) == 2
+        assert len(updates) == (2 if enabled else 4)
+        if not enabled:
+            assert updates[1]["8"] == 0
         assert updates[-1]["8"] == 240
         assert updates[-1]["4"] == 48
         if not enabled:
