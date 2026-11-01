@@ -749,6 +749,8 @@ def test_status_request_keeps_the_apk_status_attribute_after_rejection() -> None
     async def exercise() -> None:
         connections = 0
         requests: list[dict] = []
+        first_received = asyncio.Event()
+        second_received = asyncio.Event()
 
         async def handler(reader, writer) -> None:
             nonlocal connections
@@ -756,15 +758,19 @@ def test_status_request_keeps_the_apk_status_attribute_after_rejection() -> None
             requests.append(await _read_apk_tcp_request(reader))
             writer.write(b'{"cmd":2,"res":2,"msg":{}}\r\n')
             await writer.drain()
+            first_received.set()
             requests.append(await _read_apk_tcp_request(reader))
+            second_received.set()
+            writer.close()
+            await writer.wait_closed()
 
         server = await asyncio.start_server(handler, "127.0.0.1", 5555)
         device = CozyLifeDevice("127.0.0.1", timeout=1.0)
         try:
             assert await device.async_send_status()
-            await asyncio.sleep(0.05)
+            await asyncio.wait_for(first_received.wait(), timeout=2)
             assert await device.async_send_status()
-            await asyncio.sleep(0.05)
+            await asyncio.wait_for(second_received.wait(), timeout=2)
             assert connections == 1
             assert [request["msg"]["attr"] for request in requests] == [[1], [1]]
         finally:
