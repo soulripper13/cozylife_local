@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import json
 import logging
+import socket
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -47,6 +48,14 @@ class CozyLifeDevice:
         self._connection_lock: Optional[asyncio.Lock] = None
         self._status_lock: Optional[asyncio.Lock] = None
         self._last_transport_error: Optional[str] = None
+        self._tcp_user_timeout_ms: int | None = None
+        self.last_frame_received_at: float | None = None
+
+    def set_tcp_user_timeout(self, milliseconds: int) -> None:
+        """Bound unacknowledged TCP data without timing sensor reports."""
+        if milliseconds <= 0:
+            raise ValueError("TCP user timeout must be positive")
+        self._tcp_user_timeout_ms = milliseconds
 
     @property
     def ip_address(self) -> str:
@@ -157,6 +166,18 @@ class CozyLifeDevice:
                 raise
 
             self._reader = reader
+            if self._tcp_user_timeout_ms is not None:
+                tcp_socket = writer.get_extra_info("socket")
+                option = getattr(socket, "TCP_USER_TIMEOUT", None)
+                if tcp_socket is not None and option is not None:
+                    try:
+                        tcp_socket.setsockopt(
+                            socket.IPPROTO_TCP, option, self._tcp_user_timeout_ms
+                        )
+                    except OSError:
+                        writer.close()
+                        self._reader = None
+                        raise
             self._writer = writer
             self._reader_task = asyncio.create_task(
                 self._read_frames(reader, writer),
@@ -216,6 +237,8 @@ class CozyLifeDevice:
                     continue
 
                 _RAW_LOGGER.debug("Received CozyLife frame: %s", summarize_frame(raw_frame))
+                self.last_frame_received_at = time.time()
+                message = frame.get("msg")
                 sent_sn = frame.get("sn")
                 future = self._pending_responses.pop(sent_sn, None)
                 if future and not future.done():
@@ -223,7 +246,6 @@ class CozyLifeDevice:
                         frame.get("msg") if frame.get("res", 0) == 0 else None
                     )
 
-                message = frame.get("msg")
                 state_data = message.get("data") if isinstance(message, dict) else None
                 if isinstance(state_data, dict):
                     normalized_state = {
@@ -261,7 +283,10 @@ class CozyLifeDevice:
                 return None
             response = asyncio.get_running_loop().create_future()
             self._pending_responses[sent_sn] = response
-            encoded_message = (json.dumps(message, separators=(",", ":")) + "\r\n").encode("utf8")
+            # The APK's local TCP writer sends the JSON bytes directly.  CRLF
+            # delimits device-to-client frames only; adding it to client writes
+            # changes the on-wire command from the app's native form.
+            encoded_message = json.dumps(message, separators=(",", ":")).encode("utf8")
             _RAW_LOGGER.debug("Sending CozyLife frame: %s", summarize_frame(encoded_message))
             writer.write(encoded_message)
             await writer.drain()
@@ -295,9 +320,7 @@ class CozyLifeDevice:
             if writer is None:
                 return False
             message = self._create_message(cmd, payload)
-            encoded_message = (
-                json.dumps(message, separators=(",", ":")) + "\r\n"
-            ).encode("utf8")
+            encoded_message = json.dumps(message, separators=(",", ":")).encode("utf8")
             _RAW_LOGGER.debug("Sending CozyLife frame: %s", summarize_frame(encoded_message))
             writer.write(encoded_message)
             await asyncio.wait_for(writer.drain(), timeout=self._timeout)
@@ -417,7 +440,13 @@ class CozyLifeDevice:
             )
 
     async def async_send_status(self) -> bool:
-        """Write the APK status request without requiring an accepted reply."""
+        """Queue one app-shaped status request on the retained local socket.
+
+        The APK's local writer treats a completed socket write as sent and
+        leaves later frames to its independent reader. Non-state frames are
+        not a reason to disconnect a socket that may still deliver the
+        sensor's report while it is awake.
+        """
         if self._status_lock is None:
             self._status_lock = asyncio.Lock()
 
@@ -447,9 +476,7 @@ class CozyLifeDevice:
                 self._state_waiters.append(state_waiter)
 
             message = self._create_message(CMD_QUERY, {"attr": attributes})
-            encoded_message = (
-                json.dumps(message, separators=(",", ":")) + "\r\n"
-            ).encode("utf8")
+            encoded_message = json.dumps(message, separators=(",", ":")).encode("utf8")
             _RAW_LOGGER.debug("Sending CozyLife frame: %s", summarize_frame(encoded_message))
             writer.write(encoded_message)
             await asyncio.wait_for(writer.drain(), timeout=timeout)
@@ -463,7 +490,10 @@ class CozyLifeDevice:
                 )
                 return state_data or None
             except asyncio.TimeoutError:
-                _LOGGER.warning(
+                # A short no-reply window is the normal sleeping-sensor case,
+                # not an integration error. Keep it available for diagnostics
+                # without flooding the Home Assistant log at warning level.
+                _LOGGER.debug(
                     "Timeout waiting for an APK-style CozyLife state frame",
                 )
                 return None

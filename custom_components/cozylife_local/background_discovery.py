@@ -23,11 +23,11 @@ _LOGGER = logging.getLogger(__name__)
 DATA_DISCOVERY_SERVICE = "background_udp_discovery"
 DATA_DISCOVERY_LOCK = "background_udp_discovery_lock"
 DATA_DISCOVERY_STOP_UNSUB = "background_udp_discovery_stop_unsub"
-# The APK's AppDeamon invokes UdpBoardcastChecker every 10 seconds.  That
-# checker begins a five-second UDP receive window and emits one command-0
-# discovery broadcast.  This is discovery lifecycle timing only; sleeping
-# sensor wake probing is owned by the device coordinator and deliberately has
-# its own cadence.
+# The APK's AppDeamon invokes UdpBoardcastChecker every 10 seconds. It opens a
+# short Wi-Fi UDP search window (nominally five seconds) and emits one command-0
+# discovery broadcast. This shared listener deliberately remains open for Home
+# Assistant's configured devices, but preserves the APK's broadcast cadence.
+# It is discovery lifecycle timing only; it is not a sensor wake schedule.
 DISCOVERY_BROADCAST_INTERVAL_SECONDS = 10.0
 APK_NETWORK_CHANGE_BROADCAST_COUNT = 1
 # WifiUdpServer.isLocalhostOnline() expires an announced device after 15 s.
@@ -103,9 +103,24 @@ class CozyLifeBackgroundDiscovery:
 
     async def async_start(self) -> None:
         """Open the APK-style receive socket and begin its Wi-Fi cadence."""
-        if self._transport is not None:
+        if self._broadcast_task is not None:
             return
 
+        await self._async_open_receive_socket()
+        self._broadcast_task = self.hass.async_create_background_task(
+            self._async_broadcast_loop(),
+            "cozylife UDP discovery broadcaster",
+        )
+        _LOGGER.info(
+            "CozyLife UDP discovery opened its APK-style receive socket; sent %s "
+            "startup discovery request",
+            APK_NETWORK_CHANGE_BROADCAST_COUNT,
+        )
+
+    async def _async_open_receive_socket(self) -> None:
+        """Open the APK-style ephemeral UDP socket and retain its receive loop."""
+        if self._transport is not None:
+            return
         loop = asyncio.get_running_loop()
         transport, _protocol = await loop.create_datagram_endpoint(
             lambda: _ApkUdpDiscoveryProtocol(self._handle_device),
@@ -113,19 +128,13 @@ class CozyLifeBackgroundDiscovery:
             allow_broadcast=True,
         )
         self._transport = transport
-
-        # Home Assistant startup is the equivalent point at which this service
-        # first has an active local network.
         self._send_broadcasts(APK_NETWORK_CHANGE_BROADCAST_COUNT)
-        self._broadcast_task = self.hass.async_create_background_task(
-            self._async_broadcast_loop(),
-            "cozylife UDP discovery broadcaster",
-        )
-        _LOGGER.info(
-            "CozyLife UDP discovery is listening on one shared socket; sent %s "
-            "APK-style startup discovery request",
-            APK_NETWORK_CHANGE_BROADCAST_COUNT,
-        )
+
+    def _close_receive_socket(self) -> None:
+        """Close the shared ephemeral discovery socket when the service stops."""
+        if self._transport is not None:
+            self._transport.close()
+            self._transport = None
 
     async def async_stop(self) -> None:
         """Stop the shared socket when Home Assistant stops."""
@@ -136,14 +145,12 @@ class CozyLifeBackgroundDiscovery:
             except asyncio.CancelledError:
                 pass
             self._broadcast_task = None
-        if self._transport is not None:
-            self._transport.close()
-            self._transport = None
+        self._close_receive_socket()
 
     @property
     def is_running(self) -> bool:
-        """Return whether the shared receive socket is currently open."""
-        return self._transport is not None
+        """Return whether the shared APK-style discovery lifecycle is active."""
+        return self._broadcast_task is not None or self._transport is not None
 
     def register_device(
         self,
@@ -198,7 +205,7 @@ class CozyLifeBackgroundDiscovery:
         self._address_callbacks.pop(ip_address, None)
 
     async def _async_broadcast_loop(self) -> None:
-        """Keep a shared discovery request present across sensor wake windows."""
+        """Repeat the APK daemon's command-0 broadcast every ten seconds."""
         while True:
             await asyncio.sleep(DISCOVERY_BROADCAST_INTERVAL_SECONDS)
             self._send_broadcasts(1)

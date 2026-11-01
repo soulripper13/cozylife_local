@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 import importlib.util
 import json
+import socket
 import sys
 import types
 from datetime import timedelta
@@ -12,6 +14,23 @@ from pathlib import Path
 from unittest.mock import patch
 
 COMPONENT_DIR = Path(__file__).parents[1] / "custom_components" / "cozylife_local"
+
+
+async def _read_apk_tcp_request(reader: asyncio.StreamReader) -> dict:
+    """Read one bare-JSON client command like the APK's local TCP server."""
+    buffer = getattr(reader, "_cozylife_test_buffer", b"")
+    decoder = json.JSONDecoder()
+    while True:
+        try:
+            decoded, index = decoder.raw_decode(buffer.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            chunk = await reader.read(4096)
+            if not chunk:
+                raise EOFError("socket closed before a complete CozyLife command")
+            buffer += chunk
+            continue
+        reader._cozylife_test_buffer = buffer[index:].lstrip()
+        return decoded
 
 
 def _load_api():
@@ -44,6 +63,167 @@ def test_connection_refusal_is_retained_for_diagnostics() -> None:
             assert await device.async_send_status() is False
 
         assert device.last_transport_error == "ConnectionRefusedError"
+
+    asyncio.run(exercise())
+
+
+def test_median_filter_rejects_spikes_and_adapts_to_sustained_changes():
+    _load_api()
+    from cozylife_local.measurement_filter import MeasurementFilter
+    filter_ = MeasurementFilter()
+    radii = {"8": 20, "4": 10}
+    assert filter_.filter("1", {"8": 250, "4": 48}, radii) == {"8": 250, "4": 48}
+    assert filter_.filter("2", {"8": 0, "4": 49}, radii) == {"4": 49}
+    assert filter_.filter("2", {"8": 0}, radii) == {}
+    assert len(filter_.windows["8"]) == 4
+    assert filter_.filter(None, {"8": 0}, radii) == {}
+    for sn in ("3", "4", "5", "6"):
+        result = filter_.filter(sn, {"8": 0}, radii)
+    assert result == {"8": 0}
+    near = MeasurementFilter()
+    assert near.filter("1", {"8": -10}, radii) == {"8": -10}
+    assert near.filter("2", {"8": 0}, radii) == {"8": 0}
+
+
+def test_optional_filter_receive_path_defaults_off_and_rejects_replay():
+    Coordinator = _load_coordinator()
+
+    async def exercise(enabled):
+        coordinator = object.__new__(Coordinator)
+        coordinator._uses_sensor_polling = True
+        coordinator.classification = types.SimpleNamespace(is_environment_sensor=True)
+        coordinator.data = {"8": 250, "4": 48}
+        coordinator._entry = types.SimpleNamespace(
+            options={"filter_outliers": True} if enabled else {}, data={})
+        updates = []
+        def publish(data):
+            coordinator.data = data
+            updates.append(data)
+        coordinator.async_set_updated_data = publish
+        for sn, values in (("1", {"8": 250}), ("2", {"8": 0}),
+                           ("2", {"8": 0}), ("3", {"8": 240})):
+            await coordinator._async_handle_device_message(
+                {"cmd": 10, "sn": sn, "msg": {"data": values}})
+        assert len(updates) == 2
+        assert updates[-1]["8"] == 240
+        assert updates[-1]["4"] == 48
+        if not enabled:
+            assert not hasattr(coordinator, "_measurement_filter")
+    asyncio.run(exercise(False))
+    asyncio.run(exercise(True))
+
+
+def test_setup_failure_and_cancellation_release_device_and_debug_state() -> None:
+    """Exercise the setup boundary with failures before/after coordinator creation."""
+    from unittest.mock import AsyncMock, Mock
+
+    tree = ast.parse((COMPONENT_DIR / "__init__.py").read_text())
+    setup = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)
+                 and node.name == "async_setup_entry")
+    setup.returns = None
+    for arg in setup.args.args:
+        arg.annotation = None
+
+    async def exercise(error, with_coordinator):
+        discovery = types.SimpleNamespace(is_running=True, unregister_device=Mock(),
+                                          unregister_address=Mock())
+        device = types.SimpleNamespace(device_id="test", async_close=AsyncMock())
+        coordinator = types.SimpleNamespace(async_close=AsyncMock())
+        hass = types.SimpleNamespace(data={"cozylife_local": {"discovery": discovery}})
+        entry = types.SimpleNamespace(options={}, data={"ip_address": "192.0.2.1"},
+                                      entry_id="entry", title="test")
+        async def fail(*args):
+            if with_coordinator:
+                hass.data["cozylife_local"]["entry"] = coordinator
+            raise error
+        remove = Mock()
+        namespace = dict(DOMAIN="cozylife_local", DATA_DISCOVERY_SERVICE="discovery",
+                         _DEBUG_ENTRY_IDS="debug", DISCOVERY_CONTROLLER_ENTRY_TYPE="controller",
+                         _refresh_debug_logging=Mock(), _remove_debug_entry=remove,
+                         _LOGGER=Mock(), async_load_model_catalog=AsyncMock(),
+                         CozyLifeDevice=Mock(return_value=device), _async_setup_device_entry=fail)
+        exec(compile(ast.Module(body=[setup], type_ignores=[]), "setup-test", "exec"), namespace)
+        try:
+            await namespace["async_setup_entry"](hass, entry)
+            assert False, "setup should propagate failure"
+        except type(error):
+            pass
+        assert "entry" not in hass.data["cozylife_local"]
+        discovery.unregister_device.assert_called_once_with("test", "entry")
+        remove.assert_called_once_with(hass, "entry")
+        (coordinator.async_close if with_coordinator else device.async_close).assert_awaited_once()
+
+    for error in (RuntimeError("setup failed"), asyncio.CancelledError()):
+        for with_coordinator in (False, True):
+            asyncio.run(exercise(error, with_coordinator))
+
+
+def test_unload_cancels_followup_and_ignores_queued_discovery() -> None:
+    """An old coordinator cannot reopen its transport after unloading."""
+    Coordinator = _load_coordinator()
+
+    async def exercise():
+        coordinator = object.__new__(Coordinator)
+        coordinator._sensor_status_task = None
+        coordinator._identity_refresh_task = None
+        cancelled = asyncio.Event()
+
+        async def followup():
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+        coordinator._powered_followup_task = asyncio.create_task(followup())
+        await asyncio.sleep(0)
+        coordinator.device = types.SimpleNamespace(async_close=lambda: asyncio.sleep(0))
+        await coordinator.async_close()
+        assert cancelled.is_set()
+        assert coordinator._powered_followup_task is None
+        # No address updater exists: a queued callback must exit before access.
+        await coordinator.async_handle_discovered_address("192.0.2.1")
+        await coordinator._async_handle_device_message({"msg": {"data": {"8": 200}}})
+
+    asyncio.run(exercise())
+
+
+def test_sensor_delivery_timeout_preserves_acked_silent_connection() -> None:
+    """Configure kernel delivery recovery without closing a quiet reader."""
+    if not hasattr(socket, "TCP_USER_TIMEOUT"):
+        return
+    CozyLifeDevice = _load_api()
+
+    async def exercise() -> None:
+        accepted = []
+        release = asyncio.Event()
+
+        async def handle(reader, writer):
+            accepted.append(writer)
+            await release.wait()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        device = CozyLifeDevice("127.0.0.1")
+        device.set_tcp_user_timeout(1000)
+        try:
+            with patch("cozylife_local.cozylife_api.COZYLIFE_PORT", port):
+                assert await device.async_send_status()
+                writer = device._writer
+                tcp_socket = writer.get_extra_info("socket")
+                assert tcp_socket.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == 1000
+                await asyncio.sleep(1.1)
+                assert await device.async_send_status()
+                assert device._writer is writer
+                assert len(accepted) == 1
+        finally:
+            await device.async_close()
+            release.set()
+            server.close()
+            await server.wait_closed()
+            await asyncio.sleep(0)
+        assert device._reader_task is None
 
     asyncio.run(exercise())
 
@@ -371,7 +551,7 @@ def test_status_write_uses_apk_frame_and_dispatches_unsolicited_report() -> None
         reports: list[dict] = []
 
         async def handler(reader, writer) -> None:
-            request = json.loads((await reader.readline()).decode())
+            request = await _read_apk_tcp_request(reader)
             assert request["cmd"] == 2
             assert request["pv"] == 0
             assert request["msg"] == {"attr": [1]}
@@ -399,6 +579,33 @@ def test_status_write_uses_apk_frame_and_dispatches_unsolicited_report() -> None
     asyncio.run(exercise())
 
 
+def test_local_tcp_writes_use_the_apk_bare_json_framing() -> None:
+    """Local requests are JSON bytes, unlike CRLF-delimited UDP and replies."""
+    CozyLifeDevice = _load_api()
+
+    async def exercise() -> None:
+        async def handler(reader, writer) -> None:
+            raw_request = await asyncio.wait_for(reader.read(4096), timeout=0.5)
+            assert raw_request
+            assert not raw_request.endswith(b"\r\n")
+            request = json.loads(raw_request.decode())
+            assert request["cmd"] == 2
+            assert request["msg"] == {"attr": [1]}
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_server(handler, "127.0.0.1", 5555)
+        device = CozyLifeDevice("127.0.0.1", timeout=1.0)
+        try:
+            assert await device.async_send_status()
+        finally:
+            await device.async_close()
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(exercise())
+
+
 def test_status_write_dispatches_a_delayed_report_without_waiting() -> None:
     """A delayed local frame remains valid after the write itself succeeds."""
     CozyLifeDevice = _load_api()
@@ -407,7 +614,7 @@ def test_status_write_dispatches_a_delayed_report_without_waiting() -> None:
         reports: list[dict] = []
 
         async def handler(reader, writer) -> None:
-            await reader.readline()
+            await _read_apk_tcp_request(reader)
             await asyncio.sleep(0.25)
             writer.write(b'{"cmd":2,"sn":"delayed","msg":{"data":{"1":true}}}\r\n')
             await writer.drain()
@@ -447,7 +654,7 @@ def test_listener_error_does_not_stop_the_persistent_reader() -> None:
             reports.append(frame)
 
         async def handler(reader, writer) -> None:
-            await reader.readline()
+            await _read_apk_tcp_request(reader)
             writer.write(b'{"cmd":2,"sn":"first","msg":{"data":{"4":48}}}\r\n')
             await writer.drain()
             await asyncio.sleep(0.01)
@@ -485,7 +692,11 @@ def test_status_socket_is_retained_across_the_discovery_interval() -> None:
         async def handler(reader, writer) -> None:
             nonlocal connections
             connections += 1
-            while await reader.readline():
+            while True:
+                try:
+                    await _read_apk_tcp_request(reader)
+                except EOFError:
+                    break
                 writer.write(b'{"cmd":2,"sn":"report","msg":{"data":{"4":50}}}\r\n')
                 await writer.drain()
             writer.close()
@@ -507,34 +718,61 @@ def test_status_socket_is_retained_across_the_discovery_interval() -> None:
     asyncio.run(exercise())
 
 
-def test_concurrent_status_requests_share_one_persistent_socket() -> None:
-    """Discovery and wake probing cannot open competing sensor sockets."""
+def test_status_request_keeps_the_reader_owned_socket() -> None:
+    """A prior write does not force-close the APK-style local socket."""
+    CozyLifeDevice = _load_api()
+
+    async def exercise() -> None:
+        device = CozyLifeDevice("127.0.0.1", timeout=1.0)
+        disconnected = 0
+
+        def disconnect() -> None:
+            nonlocal disconnected
+            disconnected += 1
+
+        async def request_state(*_args, **_kwargs):
+            return {}
+
+        device._disconnect = disconnect
+        device._async_request_state = request_state
+
+        assert await device.async_send_status()
+        assert disconnected == 0
+
+    asyncio.run(exercise())
+
+
+def test_status_request_keeps_the_apk_status_attribute_after_rejection() -> None:
+    """An error response does not invent a non-APK property-query fallback."""
     CozyLifeDevice = _load_api()
 
     async def exercise() -> None:
         connections = 0
         requests: list[dict] = []
+        first_received = asyncio.Event()
+        second_received = asyncio.Event()
 
         async def handler(reader, writer) -> None:
             nonlocal connections
             connections += 1
-            for _ in range(2):
-                requests.append(json.loads((await reader.readline()).decode()))
+            requests.append(await _read_apk_tcp_request(reader))
+            writer.write(b'{"cmd":2,"res":2,"msg":{}}\r\n')
+            await writer.drain()
+            first_received.set()
+            requests.append(await _read_apk_tcp_request(reader))
+            second_received.set()
             writer.close()
             await writer.wait_closed()
 
         server = await asyncio.start_server(handler, "127.0.0.1", 5555)
         device = CozyLifeDevice("127.0.0.1", timeout=1.0)
         try:
-            assert all(await asyncio.gather(
-                device.async_send_status(), device.async_send_status()
-            ))
-            await asyncio.sleep(0.05)
+            assert await device.async_send_status()
+            await asyncio.wait_for(first_received.wait(), timeout=2)
+            assert await device.async_send_status()
+            await asyncio.wait_for(second_received.wait(), timeout=2)
             assert connections == 1
-            assert [request["msg"] for request in requests] == [
-                {"attr": [1]},
-                {"attr": [1]},
-            ]
+            assert [request["msg"]["attr"] for request in requests] == [[1], [1]]
         finally:
             await device.async_close()
             server.close()
@@ -553,7 +791,7 @@ def test_status_send_reconnects_after_the_peer_closes() -> None:
         async def handler(reader, writer) -> None:
             nonlocal connections
             connections += 1
-            await reader.readline()
+            await _read_apk_tcp_request(reader)
             writer.close()
             await writer.wait_closed()
 
@@ -573,14 +811,45 @@ def test_status_send_reconnects_after_the_peer_closes() -> None:
     asyncio.run(exercise())
 
 
-def test_udp_discovery_and_sleeping_sensor_wake_probe_are_separate() -> None:
-    """APK discovery cadence must not alter the sensor's wake-window probe."""
-    background_discovery = _load_background_discovery()
-    _load_coordinator()
-    from cozylife_local.coordinator import SENSOR_WAKE_PROBE_INTERVAL_SECONDS
+def test_sensor_status_write_keeps_the_reader_for_an_async_report() -> None:
+    """The APK status action leaves its reader open for a later state frame."""
+    CozyLifeDevice = _load_api()
 
-    assert background_discovery.DISCOVERY_BROADCAST_INTERVAL_SECONDS == 10.0
-    assert SENSOR_WAKE_PROBE_INTERVAL_SECONDS == 0.25
+    async def exercise() -> None:
+        reports: list[dict] = []
+
+        async def handler(reader, writer) -> None:
+            request = await _read_apk_tcp_request(reader)
+            assert request["msg"]["attr"] == [1]
+            await asyncio.sleep(0.03)
+            writer.write(b'{"cmd":10,"res":0,"msg":{"data":{"8":254,"4":44}}}\r\n')
+            await writer.drain()
+            await reader.read()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_server(handler, "127.0.0.1", 5555)
+        device = CozyLifeDevice("127.0.0.1", timeout=1.0)
+        device.set_message_listener(lambda frame: reports.append(frame))
+        try:
+            assert await device.async_send_status()
+            await asyncio.sleep(0.05)
+            assert reports and reports[0]["cmd"] == 10
+            assert device.is_connected
+        finally:
+            await device.async_close()
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(exercise())
+
+
+def test_sensor_transport_keeps_discovery_and_status_requests_separate() -> None:
+    """The sensor retry path is separate from the UDP discovery service."""
+    _load_coordinator()
+    from cozylife_local.coordinator import CozyLifeCoordinator
+
+    assert hasattr(CozyLifeCoordinator, "_async_request_sensor_status")
 
 
 def test_partial_powered_report_reads_only_missing_advertised_dpids() -> None:
@@ -1040,8 +1309,11 @@ def test_persistent_transport_preserves_existing_info_state_and_set_commands() -
         requests: list[dict] = []
 
         async def handler(reader, writer) -> None:
-            while raw_request := await reader.readline():
-                request = json.loads(raw_request.decode())
+            while True:
+                try:
+                    request = await _read_apk_tcp_request(reader)
+                except EOFError:
+                    break
                 requests.append(request)
                 if request["cmd"] == 0:
                     message = {"did": "device-1", "pid": "unknown", "dtp": "00"}
@@ -1082,7 +1354,7 @@ def test_property_write_succeeds_without_a_correlated_reply() -> None:
 
     async def exercise() -> None:
         async def handler(reader, writer) -> None:
-            request = json.loads((await reader.readline()).decode())
+            request = await _read_apk_tcp_request(reader)
             assert request["cmd"] == 3
             assert request["msg"] == {"attr": [1], "data": {"1": False}}
             # Deliberately no reply: the APK writer does not wait for one.
@@ -1171,7 +1443,7 @@ def test_state_query_accepts_apk_local_reply_with_a_different_sn() -> None:
 
     async def exercise() -> None:
         async def handler(reader, writer) -> None:
-            request = json.loads((await reader.readline()).decode())
+            request = await _read_apk_tcp_request(reader)
             assert request["cmd"] == 2
             writer.write(
                 (json.dumps({
@@ -1202,7 +1474,7 @@ def test_powered_property_query_uses_apk_listener_state_frame() -> None:
 
     async def exercise() -> None:
         async def handler(reader, writer) -> None:
-            request = json.loads((await reader.readline()).decode())
+            request = await _read_apk_tcp_request(reader)
             assert request["cmd"] == 2
             assert request["msg"] == {"attr": [0]}
             await asyncio.sleep(0.05)
@@ -1595,8 +1867,97 @@ def test_environment_report_accepts_a_valid_partial_measurement() -> None:
 
     assert coordinator._has_valid_environment_measurements({"8": 221})
     assert coordinator._has_valid_environment_measurements({"4": 48})
-    assert not coordinator._has_valid_environment_measurements({"8": 0})
-    assert not coordinator._has_valid_environment_measurements({"4": 0})
+    assert coordinator._has_valid_environment_measurements({"8": 0})
+    assert coordinator._has_valid_environment_measurements({"4": 0})
+    assert coordinator._has_valid_environment_measurements({"8": 0, "4": 48})
+    assert not coordinator._has_valid_environment_measurements({})
+    assert not coordinator._has_valid_environment_measurements({"8": None, "4": None})
+    assert not coordinator._has_valid_environment_measurements({"8": False})
+    assert not coordinator._has_valid_environment_measurements({"4": -1})
+
+
+def test_sensor_udp_announcement_sends_one_status_request() -> None:
+    """A matching UDP presence signal authorizes one local status write."""
+    CozyLifeCoordinator = _load_coordinator()
+
+    async def exercise() -> None:
+        coordinator = object.__new__(CozyLifeCoordinator)
+        entry = types.SimpleNamespace(data={"ip_address": "10.0.0.115"})
+        updates: list[dict] = []
+
+        def update_entry(_entry, *, data) -> None:
+            updates.append(data)
+
+        coordinator.hass = types.SimpleNamespace(
+            config_entries=types.SimpleNamespace(async_update_entry=update_entry),
+        )
+        calls: list[str] = []
+
+        async def send_status() -> bool:
+            calls.append("status")
+            return True
+
+        async def update_ip_address(_ip_address: str) -> bool:
+            return False
+
+        coordinator._entry = entry
+        coordinator._uses_sensor_polling = True
+        coordinator.device = types.SimpleNamespace(
+            async_send_status=send_status,
+            async_update_ip_address=update_ip_address,
+        )
+        await coordinator.async_handle_discovered_address("10.0.0.115")
+
+        assert updates == []
+        assert calls == ["status"]
+        assert not hasattr(coordinator, "_sensor_status_pending")
+
+    asyncio.run(exercise())
+
+
+def test_sensor_status_attempt_loop_is_independent_of_udp_announcements() -> None:
+    """Sleeping-sensor attempts are not limited to the ten-second UDP cache."""
+    CozyLifeCoordinator = _load_coordinator()
+    coordinator_module = sys.modules["cozylife_local.coordinator"]
+    original_interval = coordinator_module.SENSOR_STATUS_ATTEMPT_INTERVAL_SECONDS
+    coordinator_module.SENSOR_STATUS_ATTEMPT_INTERVAL_SECONDS = 0.001
+
+    async def exercise() -> None:
+        coordinator = object.__new__(CozyLifeCoordinator)
+        attempts: list[None] = []
+
+        async def send_status() -> bool:
+            attempts.append(None)
+            return True
+
+        coordinator.hass = types.SimpleNamespace(
+            loop=asyncio.get_running_loop(),
+            async_create_background_task=lambda coroutine, _name: asyncio.create_task(
+                coroutine
+            ),
+        )
+        coordinator.device = types.SimpleNamespace(
+            async_send_status=send_status,
+            async_close=lambda: asyncio.sleep(0),
+        )
+        coordinator._uses_sensor_polling = True
+        coordinator._sensor_status_task = None
+        coordinator._identity_refresh_task = None
+
+        await coordinator.async_start_discovery()
+        first_task = coordinator._sensor_status_task
+        await coordinator.async_start_discovery()
+        assert coordinator._sensor_status_task is first_task
+        await asyncio.sleep(0.01)
+        assert len(attempts) >= 2
+
+        await coordinator.async_close()
+        assert coordinator._sensor_status_task is None
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        coordinator_module.SENSOR_STATUS_ATTEMPT_INTERVAL_SECONDS = original_interval
 
 
 def test_powered_device_keeps_periodic_availability_refresh() -> None:
@@ -1737,21 +2098,21 @@ def test_powered_udp_announcement_queues_one_gated_refresh() -> None:
     asyncio.run(exercise())
 
 
-def test_sensor_udp_announcement_queues_one_gated_status_write() -> None:
-    """A known sleeping sensor receives one status write per UDP reply."""
+def test_sensor_udp_announcement_sends_status_without_an_ip_change() -> None:
+    """A presence announcement triggers one state request even at the same IP."""
     CozyLifeCoordinator = _load_coordinator()
 
     async def exercise() -> None:
         coordinator = object.__new__(CozyLifeCoordinator)
         entry = types.SimpleNamespace(data={"ip_address": "10.0.0.115"})
         updates: list[dict] = []
-        status_writes: list[bool] = []
 
         def update_entry(_entry, *, data) -> None:
             updates.append(data)
 
         coordinator.hass = types.SimpleNamespace(
-            config_entries=types.SimpleNamespace(async_update_entry=update_entry)
+            config_entries=types.SimpleNamespace(async_update_entry=update_entry),
+            loop=types.SimpleNamespace(time=lambda: 100.0),
         )
         coordinator._entry = entry
         coordinator._uses_sensor_polling = True
@@ -1760,8 +2121,11 @@ def test_sensor_udp_announcement_queues_one_gated_status_write() -> None:
         async def update_ip_address(_ip_address: str) -> bool:
             return False
 
+        status_requests = 0
+
         async def send_status() -> bool:
-            status_writes.append(True)
+            nonlocal status_requests
+            status_requests += 1
             return True
 
         coordinator.device.async_update_ip_address = update_ip_address
@@ -1770,7 +2134,7 @@ def test_sensor_udp_announcement_queues_one_gated_status_write() -> None:
         await coordinator.async_handle_discovered_address("10.0.0.115")
 
         assert updates == []
-        assert status_writes == [True]
+        assert status_requests == 1
 
     asyncio.run(exercise())
 

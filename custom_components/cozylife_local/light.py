@@ -52,7 +52,7 @@ async def async_setup_entry(
     coordinator: CozyLifeCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
     if coordinator.device.dpid is None or coordinator.device.device_model_name is None:
-        _LOGGER.error(f"Missing device DPID or model name for {coordinator.device.ip_address}. Cannot set up light.")
+        _LOGGER.error("Missing device DPID or model name. Cannot set up light.")
         return
 
     if not coordinator.classification.is_light:
