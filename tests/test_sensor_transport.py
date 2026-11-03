@@ -123,6 +123,48 @@ def test_framing_preserves_legacy_default_and_tested_sensor():
     assert device._encode_message(frame) == json.dumps(frame, separators=(",", ":")).encode()
 
 
+def test_fragmented_and_coalesced_reports_survive_rejected_control_ack():
+    """TCP segmentation and rejected controls cannot drop later reports."""
+    Device = _load_api()
+    async def exercise():
+        finished = asyncio.Event()
+        async def handler(reader, writer):
+            try:
+                await reader.readline()
+                writer.write(b'{"cmd":10,"msg":{"data":{"1":')
+                await writer.drain()
+                await asyncio.sleep(0.01)
+                writer.write(b'1}}}\r\n{"cmd":3,"res":2,"msg":{"data":{"1":0}}}\r\n'
+                             b'{"cmd":10,"msg":{"data":{"18":2,"19":1}}}\r\n')
+                await writer.drain()
+                await finished.wait()
+            finally:
+                writer.close()
+                await writer.wait_closed()
+        server = await asyncio.start_server(handler, "127.0.0.1", 0)
+        device = Device("127.0.0.1", timeout=1)
+        received = []
+        event = asyncio.Event()
+        def listener(frame):
+            if frame.get("res", 0) == 0:
+                received.append(frame["msg"]["data"])
+                if len(received) == 2:
+                    event.set()
+        device.set_message_listener(listener)
+        try:
+            with patch("cozylife_local.cozylife_api.COZYLIFE_PORT", server.sockets[0].getsockname()[1]):
+                assert await device.async_request_properties()
+                await asyncio.wait_for(event.wait(), 1)
+                assert received == [{"1": 1}, {"18": 2, "19": 1}]
+        finally:
+            finished.set()
+            await device.async_close()
+            server.close()
+            await server.wait_closed()
+            await asyncio.sleep(0)
+    asyncio.run(exercise())
+
+
 def test_cancel_during_write_releases_registered_response_waiters():
     Device = _load_api()
     async def exercise(state_request):
