@@ -67,6 +67,159 @@ def test_connection_refusal_is_retained_for_diagnostics() -> None:
     asyncio.run(exercise())
 
 
+def test_crlf_plug_queries_controls_and_identity_use_one_encoder():
+    """Reproduce #91 with a peer that acts only on complete CRLF lines."""
+    Device = _load_api()
+
+    async def exercise():
+        state = {"1": 1, "18": 2, "19": 1}
+        requests = []
+        completed = asyncio.Event()
+        async def handler(reader, writer):
+            try:
+                while raw := await reader.readline():
+                    assert raw.endswith(b"\r\n")
+                    frame = json.loads(raw)
+                    requests.append(frame)
+                    if frame["cmd"] == 3:
+                        state.update(frame["msg"]["data"])
+                    response = {"cmd": frame["cmd"], "sn": frame["sn"], "res": 0,
+                                "msg": {"data": dict(state)}}
+                    writer.write((json.dumps(response) + "\r\n").encode())
+                    await writer.drain()
+                    if len(requests) == 5:
+                        completed.set()
+            finally:
+                writer.close()
+                await writer.wait_closed()
+        server = await asyncio.start_server(handler, "127.0.0.1", 0)
+        device = Device("127.0.0.1", timeout=1)
+        device._pid = "h38t1p"
+        try:
+            with patch("cozylife_local.cozylife_api.COZYLIFE_PORT", server.sockets[0].getsockname()[1]):
+                assert await device._send_receive(0, {})
+                assert await device.async_set_state({"1": 0})
+                assert (await device.async_get_state(["1", "18", "19"]))["1"] == 0
+                assert await device.async_set_state({"1": 1})
+                assert (await device.async_get_state(["1", "18", "19"])) == state
+                await asyncio.wait_for(completed.wait(), 2)
+                assert state == {"1": 1, "18": 2, "19": 1}
+        finally:
+            await device.async_close()
+            server.close()
+            await server.wait_closed()
+            await asyncio.sleep(0)
+    asyncio.run(exercise())
+
+
+def test_framing_preserves_legacy_default_and_tested_sensor():
+    Device = _load_api()
+    device = Device("192.0.2.1")
+    frame = {"pv": 0, "cmd": 2, "sn": "1", "msg": {"attr": [1]}}
+    for pid in (None, "h38t1p", "P6CiQT", "0nd7WQ"):
+        device._pid = pid
+        assert device._encode_message(frame).endswith(b"\r\n")
+    device._pid = "Z4tRml"
+    assert device._encode_message(frame) == json.dumps(frame, separators=(",", ":")).encode()
+
+
+def test_fragmented_and_coalesced_reports_survive_rejected_control_ack():
+    """TCP segmentation and rejected controls cannot drop later reports."""
+    Device = _load_api()
+    async def exercise():
+        finished = asyncio.Event()
+        async def handler(reader, writer):
+            try:
+                await reader.readline()
+                writer.write(b'{"cmd":10,"msg":{"data":{"1":')
+                await writer.drain()
+                await asyncio.sleep(0.01)
+                writer.write(b'1}}}\r\n{"cmd":3,"res":2,"msg":{"data":{"1":0}}}\r\n'
+                             b'{"cmd":10,"msg":{"data":{"18":2,"19":1}}}\r\n')
+                await writer.drain()
+                await finished.wait()
+            finally:
+                writer.close()
+                await writer.wait_closed()
+        server = await asyncio.start_server(handler, "127.0.0.1", 0)
+        device = Device("127.0.0.1", timeout=1)
+        received = []
+        event = asyncio.Event()
+        def listener(frame):
+            if frame.get("res", 0) == 0:
+                received.append(frame["msg"]["data"])
+                if len(received) == 2:
+                    event.set()
+        device.set_message_listener(listener)
+        try:
+            with patch("cozylife_local.cozylife_api.COZYLIFE_PORT", server.sockets[0].getsockname()[1]):
+                assert await device.async_request_properties()
+                await asyncio.wait_for(event.wait(), 1)
+                assert received == [{"1": 1}, {"18": 2, "19": 1}]
+        finally:
+            finished.set()
+            await device.async_close()
+            server.close()
+            await server.wait_closed()
+            await asyncio.sleep(0)
+    asyncio.run(exercise())
+
+
+def test_cancel_during_write_releases_registered_response_waiters():
+    Device = _load_api()
+    async def exercise(state_request):
+        device = Device("192.0.2.1")
+        draining = asyncio.Event()
+        async def drain():
+            draining.set()
+            await asyncio.Event().wait()
+        async def connect(**kwargs):
+            return None
+        device._connect = connect
+        device._writer = types.SimpleNamespace(write=lambda data: None, drain=drain)
+        task = asyncio.create_task(
+            device.async_get_state(["1"]) if state_request else device._send_receive(0, {}))
+        await asyncio.wait_for(draining.wait(), 1)
+        task.cancel()
+        try:
+            await task
+            assert False, "cancellation must propagate"
+        except asyncio.CancelledError:
+            pass
+        assert device._pending_responses == {}
+        assert device._state_waiters == []
+    asyncio.run(exercise(False))
+    asyncio.run(exercise(True))
+
+
+def test_state_reader_ignores_malformed_and_rejected_state_frames():
+    Device = _load_api()
+    async def exercise():
+        async def handler(reader, writer):
+            try:
+                await reader.readline()
+                writer.write(b'[]\r\n{"sn":[],"msg":{}}\r\n')
+                writer.write(b'{"cmd":2,"res":2,"msg":{"data":{"1":0}}}\r\n')
+                await writer.drain()
+                await asyncio.sleep(0.02)
+                writer.write(b'{"cmd":2,"res":0,"msg":{"data":{"1":1}}}\r\n')
+                await writer.drain()
+            finally:
+                writer.close()
+                await writer.wait_closed()
+        server = await asyncio.start_server(handler, "127.0.0.1", 0)
+        device = Device("127.0.0.1", timeout=1)
+        try:
+            with patch("cozylife_local.cozylife_api.COZYLIFE_PORT", server.sockets[0].getsockname()[1]):
+                assert await device.async_get_state(["1"]) == {"1": 1}
+        finally:
+            await device.async_close()
+            server.close()
+            await server.wait_closed()
+            await asyncio.sleep(0)
+    asyncio.run(exercise())
+
+
 def test_median_filter_rejects_spikes_and_adapts_to_sustained_changes():
     _load_api()
     from cozylife_local.measurement_filter import MeasurementFilter
