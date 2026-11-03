@@ -67,6 +67,62 @@ def test_connection_refusal_is_retained_for_diagnostics() -> None:
     asyncio.run(exercise())
 
 
+def test_crlf_plug_queries_controls_and_identity_use_one_encoder():
+    """Reproduce #91 with a peer that acts only on complete CRLF lines."""
+    Device = _load_api()
+
+    async def exercise():
+        state = {"1": 1, "18": 2, "19": 1}
+        requests = []
+        completed = asyncio.Event()
+        async def handler(reader, writer):
+            try:
+                while raw := await reader.readline():
+                    assert raw.endswith(b"\r\n")
+                    frame = json.loads(raw)
+                    requests.append(frame)
+                    if frame["cmd"] == 3:
+                        state.update(frame["msg"]["data"])
+                    response = {"cmd": frame["cmd"], "sn": frame["sn"], "res": 0,
+                                "msg": {"data": dict(state)}}
+                    writer.write((json.dumps(response) + "\r\n").encode())
+                    await writer.drain()
+                    if len(requests) == 5:
+                        completed.set()
+            finally:
+                writer.close()
+                await writer.wait_closed()
+        server = await asyncio.start_server(handler, "127.0.0.1", 0)
+        device = Device("127.0.0.1", timeout=1)
+        device._pid = "h38t1p"
+        try:
+            with patch("cozylife_local.cozylife_api.COZYLIFE_PORT", server.sockets[0].getsockname()[1]):
+                assert await device._send_receive(0, {})
+                assert await device.async_set_state({"1": 0})
+                assert (await device.async_get_state(["1", "18", "19"]))["1"] == 0
+                assert await device.async_set_state({"1": 1})
+                assert (await device.async_get_state(["1", "18", "19"])) == state
+                await asyncio.wait_for(completed.wait(), 2)
+                assert state == {"1": 1, "18": 2, "19": 1}
+        finally:
+            await device.async_close()
+            server.close()
+            await server.wait_closed()
+            await asyncio.sleep(0)
+    asyncio.run(exercise())
+
+
+def test_framing_preserves_legacy_default_and_tested_sensor():
+    Device = _load_api()
+    device = Device("192.0.2.1")
+    frame = {"pv": 0, "cmd": 2, "sn": "1", "msg": {"attr": [1]}}
+    for pid in (None, "h38t1p", "P6CiQT", "0nd7WQ"):
+        device._pid = pid
+        assert device._encode_message(frame).endswith(b"\r\n")
+    device._pid = "Z4tRml"
+    assert device._encode_message(frame) == json.dumps(frame, separators=(",", ":")).encode()
+
+
 def test_median_filter_rejects_spikes_and_adapts_to_sustained_changes():
     _load_api()
     from cozylife_local.measurement_filter import MeasurementFilter

@@ -57,6 +57,17 @@ class CozyLifeDevice:
             raise ValueError("TCP user timeout must be positive")
         self._tcp_user_timeout_ms = milliseconds
 
+    def _encode_message(self, message: Dict[str, Any]) -> bytes:
+        """Preserve legacy CRLF framing except for the tested sensor profile.
+
+        h38t1p firmware requires CRLF for queries and writes (issue #91).
+        The APK writer's bare JSON is not a universal firmware contract.
+        Unknown devices retain legacy framing during identity discovery.
+        Z4tRml retains the bare framing used in the ongoing sensor test.
+        """
+        encoded = json.dumps(message, separators=(",", ":")).encode("utf8")
+        return encoded if self._pid == "Z4tRml" else encoded + b"\r\n"
+
     @property
     def ip_address(self) -> str:
         return self._ip_address
@@ -283,10 +294,7 @@ class CozyLifeDevice:
                 return None
             response = asyncio.get_running_loop().create_future()
             self._pending_responses[sent_sn] = response
-            # The APK's local TCP writer sends the JSON bytes directly.  CRLF
-            # delimits device-to-client frames only; adding it to client writes
-            # changes the on-wire command from the app's native form.
-            encoded_message = json.dumps(message, separators=(",", ":")).encode("utf8")
+            encoded_message = self._encode_message(message)
             _RAW_LOGGER.debug("Sending CozyLife frame: %s", summarize_frame(encoded_message))
             writer.write(encoded_message)
             await writer.drain()
@@ -320,7 +328,7 @@ class CozyLifeDevice:
             if writer is None:
                 return False
             message = self._create_message(cmd, payload)
-            encoded_message = json.dumps(message, separators=(",", ":")).encode("utf8")
+            encoded_message = self._encode_message(message)
             _RAW_LOGGER.debug("Sending CozyLife frame: %s", summarize_frame(encoded_message))
             writer.write(encoded_message)
             await asyncio.wait_for(writer.drain(), timeout=self._timeout)
@@ -476,7 +484,7 @@ class CozyLifeDevice:
                 self._state_waiters.append(state_waiter)
 
             message = self._create_message(CMD_QUERY, {"attr": attributes})
-            encoded_message = json.dumps(message, separators=(",", ":")).encode("utf8")
+            encoded_message = self._encode_message(message)
             _RAW_LOGGER.debug("Sending CozyLife frame: %s", summarize_frame(encoded_message))
             writer.write(encoded_message)
             await asyncio.wait_for(writer.drain(), timeout=timeout)
