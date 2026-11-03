@@ -247,10 +247,16 @@ class CozyLifeDevice:
                     _LOGGER.warning("Invalid CozyLife frame: %s", type(err).__name__)
                     continue
 
+                if not isinstance(frame, dict):
+                    _LOGGER.debug("Ignoring non-object CozyLife frame")
+                    continue
+
                 _RAW_LOGGER.debug("Received CozyLife frame: %s", summarize_frame(raw_frame))
                 self.last_frame_received_at = time.time()
                 message = frame.get("msg")
                 sent_sn = frame.get("sn")
+                if not isinstance(sent_sn, (str, int)) or isinstance(sent_sn, bool):
+                    sent_sn = None
                 future = self._pending_responses.pop(sent_sn, None)
                 if future and not future.done():
                     future.set_result(
@@ -258,7 +264,7 @@ class CozyLifeDevice:
                     )
 
                 state_data = message.get("data") if isinstance(message, dict) else None
-                if isinstance(state_data, dict):
+                if frame.get("res", 0) == 0 and isinstance(state_data, dict):
                     normalized_state = {
                         str(key): value for key, value in state_data.items()
                     }
@@ -285,6 +291,7 @@ class CozyLifeDevice:
 
     async def _send_receive(self, cmd: int, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Send a frame through the persistent reader-owned connection."""
+        sent_sn = None
         try:
             await self._connect()
             message = self._create_message(cmd, payload)
@@ -297,7 +304,7 @@ class CozyLifeDevice:
             encoded_message = self._encode_message(message)
             _RAW_LOGGER.debug("Sending CozyLife frame: %s", summarize_frame(encoded_message))
             writer.write(encoded_message)
-            await writer.drain()
+            await asyncio.wait_for(writer.drain(), timeout=self._timeout)
             try:
                 return await asyncio.wait_for(asyncio.shield(response), timeout=self._timeout)
             except asyncio.TimeoutError:
@@ -313,6 +320,11 @@ class CozyLifeDevice:
             _RAW_LOGGER.debug("CozyLife request transport failure: %s", type(err).__name__)
             self._disconnect()
             return None
+        finally:
+            if sent_sn is not None:
+                pending = self._pending_responses.pop(sent_sn, None)
+                if pending is not None and not pending.done():
+                    pending.cancel()
 
     async def _async_send(self, cmd: int, payload: Dict[str, Any]) -> bool:
         """Write one APK-shaped local command without requiring an ACK frame.
@@ -471,6 +483,7 @@ class CozyLifeDevice:
         transport_timeout: float | None = None,
     ) -> Optional[Dict[str, Any]]:
         """Use the APK write-and-listen state path over one durable socket."""
+        state_waiter = None
         try:
             timeout = self._timeout if transport_timeout is None else transport_timeout
             await self._connect(timeout=timeout)
@@ -511,6 +524,12 @@ class CozyLifeDevice:
         except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
             self._disconnect()
             return None
+        finally:
+            if state_waiter is not None:
+                if state_waiter in self._state_waiters:
+                    self._state_waiters.remove(state_waiter)
+                if not state_waiter.done():
+                    state_waiter.cancel()
 
     async def async_set_state(self, attributes: Dict[str, Any]) -> bool:
         """Write a user command without waiting behind availability work.
