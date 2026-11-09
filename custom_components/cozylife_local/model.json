@@ -21753,7 +21753,7 @@
             "ext": [],
             "g_u": "2021121815080062",
             "i": "https://static-cf-cn.doiting.com/storage/images/f5ea00756095e94ec173c3658d94cc2d.png",
-            "m_n": "^HTX-.*$",
+            "m_n": "^HTX-.{6}$",
             "mp": [
               {
                 "i": "https://static-cf-cn.doiting.com/storage/images/483391231fabe7297e5a9c284e46a45f.jpg",
@@ -22303,6 +22303,160 @@
             "pid": "yUnbvr",
             "s": 0,
             "s_u": "2026101513300001"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "ext": [],
+            "g_u": "2021060318130019",
+            "i": "https://static-cf-cn.doiting.com/storage/images/df9647dbdf3d99ab4505f2dbe4837d25.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/9c2bf36a2ed75f3b7c305e88e7d37e5c.png",
+                "n": "DoHome五路_3",
+                "url": "2021030515410003"
+              }
+            ],
+            "n": "T80 Smart Bulb",
+            "net": "02",
+            "p": "1",
+            "p_c_d": null,
+            "p_p_p": "Light",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "9r9sOf",
+            "s": 0,
+            "s_u": "2021062115130027"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "ext": [],
+            "g_u": "2021060318130019",
+            "i": "https://static-cf-cn.doiting.com/storage/images/df9647dbdf3d99ab4505f2dbe4837d25.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/9c2bf36a2ed75f3b7c305e88e7d37e5c.png",
+                "n": "DoHome五路_3",
+                "url": "2021030515410003"
+              }
+            ],
+            "n": "T80 Smart Bulb",
+            "net": "02",
+            "p": "1",
+            "p_c_d": null,
+            "p_p_p": "Light",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "pljlzU",
+            "s": 0,
+            "s_u": "2021062115130027"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              3,
+              4,
+              7,
+              8,
+              9,
+              13,
+              14,
+              21
+            ],
+            "ext": [],
+            "g_u": "2021060516180022",
+            "i": "https://static-cf-cn.doiting.com/storage/images/30f10f8a0d87ee6146331ccd5d10117f.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/03720942bfd6bceadc160f812a471e8f.jpg",
+                "n": "DoHome两路球泡灯_2",
+                "url": "2021030914310005"
+              },
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/6a36aa6be9ecca6be4d46268ee44aef2.jpg",
+                "n": "Two-way bulb",
+                "url": "2021030911280004"
+              }
+            ],
+            "n": "Smart Ceiling Light",
+            "net": "02",
+            "p": "1",
+            "p_c_d": null,
+            "p_p_p": "Light",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "d7cDT7",
+            "s": 0,
+            "s_u": "2021070311260031"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              13,
+              14,
+              15,
+              44
+            ],
+            "ext": [],
+            "g_u": "2021060318130019",
+            "i": "https://static-cf-cn.doiting.com/storage/images/55f0f198b586f08e7a8fb708a5f5ebf8.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/9c2bf36a2ed75f3b7c305e88e7d37e5c.png",
+                "n": "DoHome五路_3",
+                "url": "2021030515410003"
+              },
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/bba71e8bfbb374fab7f82beb1265b5c2.png",
+                "n": "DoHome Five-way",
+                "url": "2020101401110009"
+              },
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/8d2e7f7ec3c4b4e8c1014db4efab553b.jpg",
+                "n": "宝莲灯五路",
+                "url": "2021010514220001"
+              }
+            ],
+            "n": "Smart Ceiling Light",
+            "net": "02",
+            "p": "1",
+            "p_c_d": null,
+            "p_p_p": "Light",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "EbCakS",
+            "s": 0,
+            "s_u": "2021062115130027"
           }
         ],
         "n": "Light"
@@ -33031,6 +33185,44 @@
             "pid": "brWecS",
             "s": 0,
             "s_u": "2021070311510032"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              3,
+              18,
+              19,
+              20,
+              21,
+              23,
+              24,
+              25
+            ],
+            "ext": [
+              "3"
+            ],
+            "g_u": "2021060410240020",
+            "i": "https://static-cf-cn.doiting.com/storage/images/db8695c260059cb072433db4c7f41f20.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/38c443f6322e0c76a449292c237ecd46.png",
+                "n": "",
+                "url": "2026091518020008"
+              }
+            ],
+            "n": "Pet Recognition",
+            "net": "02",
+            "p": "1",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "xqtA4n",
+            "s": 0,
+            "s_u": "2021070311510032"
           }
         ],
         "n": "Electrical"
@@ -34939,11 +35131,11 @@
             ],
             "ext": [],
             "g_u": "2026061719070006",
-            "i": "https://static-cf-cn.doiting.com/storage/images/72f952bfac1d0fb6eba6569ca750bb17.png",
+            "i": "https://static-cf-cn.doiting.com/storage/images/fb08b21af15a63b5e630395e42b60c44.png",
             "m_n": "^SCX-.{6}$",
             "mp": [
               {
-                "i": "https://static-cf-cn.doiting.com/storage/images/734d9e8c33e62137e0f7cb37f9cd8229.png",
+                "i": "https://static-cf-cn.doiting.com/storage/images/2c20292a2baca4c1a8c4d1a30be41210.png",
                 "n": "",
                 "url": "2026090717050001"
               }
@@ -34958,6 +35150,142 @@
             "pid": "2sZ1rW",
             "s": 0,
             "s_u": "2026061719070006"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1
+            ],
+            "ext": [],
+            "g_u": "2026102718240000",
+            "i": "https://static-cf-cn.doiting.com/storage/images/72f952bfac1d0fb6eba6569ca750bb17.png",
+            "m_n": "^QD-.{6}$",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/985cc0814ce47a480a5606168c07079f.png",
+                "n": "",
+                "url": "2026102718240000"
+              }
+            ],
+            "n": "Carbugde",
+            "net": "01",
+            "p": "2",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "LuylNB",
+            "s": 0,
+            "s_u": "2026102718240000"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1
+            ],
+            "ext": [],
+            "g_u": "2026102919090006",
+            "i": "https://static-cf-cn.doiting.com/storage/images/5f1443b24da3a312ed9b2fd23f251f95.png",
+            "m_n": "^DBYB-.{6}$",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/d1a949274a047510fd500596abf317ff.png",
+                "n": "",
+                "url": "2026102919090006"
+              }
+            ],
+            "n": "Carbugde",
+            "net": "01",
+            "p": "2",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "sFhp3w",
+            "s": 0,
+            "s_u": "2026102919090006"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              0
+            ],
+            "ext": [],
+            "g_u": "1",
+            "i": "https://static-cf-cn.doiting.com/storage/images/84ce7fc1989274f03cc3b84fa9b684f9.png",
+            "m_n": "^.*[aA][iI]-[mM].*$",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/c8df5f207d10c2f5bad535ffd70a91f9.png",
+                "n": "",
+                "url": "2026091513500001"
+              }
+            ],
+            "n": "AI Recording Card",
+            "net": "01",
+            "p": "2",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "yjQ1vH",
+            "s": 0,
+            "s_u": "2021070311260031"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1
+            ],
+            "ext": [],
+            "g_u": "1",
+            "i": "https://static-cf-cn.doiting.com/storage/images/957f92e46e3d6fbb7572a3abb4ba92d8.png",
+            "m_n": "^CLGLASS$",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/8de1d271607c8fe53fceb133d88c07bd.png",
+                "n": "",
+                "url": "2026090109340001"
+              }
+            ],
+            "n": "AI Glasses",
+            "net": "01",
+            "p": "2",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "eCgRXQ",
+            "s": 0,
+            "s_u": "2021070311260031"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1
+            ],
+            "ext": [],
+            "g_u": "2026102919090006",
+            "i": "https://static-cf-cn.doiting.com/storage/images/c387e3aa2f0a73966d3c78aeb310763a.jpg",
+            "m_n": "^CXJ-.{6}$",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/d1a949274a047510fd500596abf317ff.png",
+                "n": "",
+                "url": "2026102919090006"
+              }
+            ],
+            "n": "Innovation Sphere",
+            "net": "01",
+            "p": "2",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "bFlKYC",
+            "s": 0,
+            "s_u": "2026102919090006"
           }
         ],
         "n": "Outdoor Travel"
@@ -35328,7 +35656,7 @@
               "report_interval": "3600",
               "report_interval_dpid": "14"
             },
-            "p_p_p": "Light",
+            "p_p_p": "TemperatureSensor",
             "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "s1AxFq",
@@ -35987,6 +36315,109 @@
             "pid": "7212Ui",
             "s": 0,
             "s_u": "2021070311260031"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              6,
+              0
+            ],
+            "ext": [],
+            "g_u": "2021101315490044",
+            "i": "https://static-cf-cn.doiting.com/storage/images/67156edf3096fd1dae7497bd12a94a27.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/0bcd4529163e591451bd441a1d536e4b.png",
+                "n": "",
+                "url": "2026102815140012"
+              }
+            ],
+            "n": "鸟类识别",
+            "net": "02",
+            "p": "1",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "9OBT3M",
+            "s": 0,
+            "s_u": "2021070311260031"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              6,
+              0
+            ],
+            "ext": [],
+            "g_u": "2021101315490044",
+            "i": "https://static-cf-cn.doiting.com/storage/images/dad125ef408d233c1e08a06a62f0c4e7.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/cbeb7a2ce699120ee53f3f733c3ab55a.png",
+                "n": "",
+                "url": "2026102818190013"
+              }
+            ],
+            "n": "手势识别",
+            "net": "02",
+            "p": "1",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "9dljBq",
+            "s": 0,
+            "s_u": "2021070311260031"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              4,
+              8,
+              9,
+              12,
+              13,
+              14,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              30
+            ],
+            "ext": [
+              "4",
+              "5",
+              "6"
+            ],
+            "g_u": "2023120210160168",
+            "i": "https://static-cf-cn.doiting.com/storage/images/f78f3bd85136ddf5ea6b6738e7b314cd.png",
+            "m_n": "TT",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/804dca792612604ae13036c6a3824d84.png",
+                "n": "Temperature and Humidity Sensor",
+                "url": "2023120210160168"
+              }
+            ],
+            "n": "Temperature and humidity sensor",
+            "net": "02",
+            "p": "1",
+            "p_c_d": {
+              "report_interval": "3600",
+              "report_interval_dpid": "14"
+            },
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "1ZYD0o",
+            "s": 0,
+            "s_u": "2023120210160168"
           }
         ],
         "n": "Sensor"
@@ -38748,6 +39179,108 @@
             "p_u": "",
             "pa_u": "2025091815230001",
             "pid": "x0VKNx",
+            "s": 0,
+            "s_u": "2021070311260031"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25
+            ],
+            "ext": [],
+            "g_u": "2026032615520245",
+            "i": "https://static-cf-cn.doiting.com/storage/images/b11fc8c744be13bd0229dbc59d01f91f.png",
+            "m_n": "^T26$",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/1313074a0cb823146d83d2e029ba6f09.png",
+                "n": "",
+                "url": "2026102710090011"
+              }
+            ],
+            "n": "智能耳机",
+            "net": "01",
+            "p": "2",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "dlxAjm",
+            "s": 0,
+            "s_u": "2021070311260031"
+          },
+          {
+            "cl": [],
+            "dpid": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25
+            ],
+            "ext": [],
+            "g_u": "2026032615520245",
+            "i": "https://static-cf-cn.doiting.com/storage/images/b68df1666fefb92858b418c8e7ee35b7.png",
+            "m_n": "^CL_M3$",
+            "mp": [
+              {
+                "i": "https://static-cf-cn.doiting.com/storage/images/710b99c658cc569f2630d55b60232ec4.png",
+                "n": "",
+                "url": "2026103017250014"
+              }
+            ],
+            "n": "智能耳机",
+            "net": "01",
+            "p": "2",
+            "p_c_d": null,
+            "p_p_p": "Placeholder",
+            "p_u": "",
+            "pa_u": "2025091815230001",
+            "pid": "DBC4XG",
             "s": 0,
             "s_u": "2021070311260031"
           }
