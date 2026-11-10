@@ -120,6 +120,8 @@ Multi-gang devices (such as double or triple rocker wall switches) share a singl
 
 Supported powered devices are checked locally in the background. If a light, plug, or switch loses physical power and no longer responds to its local connection, Home Assistant marks its entities unavailable after the next failed health check. This is distinct from normal control: turning a device on or off does not wait behind the background availability check.
 
+If a powered device's existing TCP connection accepts writes but delivers no state report for 30 seconds after a properties request, the next local operation replaces that connection. Further discovery announcements do not extend this timeout. Valid partial state reports, including zero values, keep the connection usable; a matching request sequence number is not required. Failed reconnects are retried by subsequent background checks. Control commands are not automatically replayed. This recovery timeout does not apply to sleeping battery sensors.
+
 ---
 
 ### Smart Plugs & Power Monitoring Outlets

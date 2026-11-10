@@ -515,8 +515,9 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # UDP cache is only an app-side address-routing mechanism, not device
         # availability evidence: powered products can accept the local TCP
         # request while answering discovery only intermittently. A successful
-        # TCP connect and completed local write therefore proves availability;
-        # a failed local request makes the entity unavailable. Waiting for a
+        # TCP connect and completed local write provisionally keeps availability;
+        # the API retires unanswered powered sessions on a later operation.
+        # A failed local request makes the entity unavailable. Waiting for a
         # state frame was introduced in 1.1.3 and can hold the shared writer
         # lock long enough to delay a user control command.
         if not await self.device.async_request_properties(

@@ -18,6 +18,7 @@ CMD_INFO = 0
 CMD_QUERY = 2
 CMD_SET = 3
 DPID_QUERY_ATTEMPTS = 3
+POWERED_RESPONSE_TIMEOUT_SECONDS = 30.0
 _last_sn = 0
 
 
@@ -50,6 +51,7 @@ class CozyLifeDevice:
         self._last_transport_error: Optional[str] = None
         self._tcp_user_timeout_ms: int | None = None
         self.last_frame_received_at: float | None = None
+        self._properties_requested_at: float | None = None
 
     def set_tcp_user_timeout(self, milliseconds: int) -> None:
         """Bound unacknowledged TCP data without timing sensor reports."""
@@ -155,6 +157,17 @@ class CozyLifeDevice:
         Cozy Life's Android app has a dedicated TCP reader over its socket pool.
         Reconnecting for each request loses frames that arrive between queries.
         """
+        if (
+            self._properties_requested_at is not None
+            and time.monotonic() - self._properties_requested_at
+            >= POWERED_RESPONSE_TIMEOUT_SECONDS
+        ):
+            # A completed write can outlive a broken network session. Unlike
+            # Android's network-change callback, HA may receive no notification.
+            # Retire an unanswered powered query before the next operation;
+            # do not wait here or replay a possibly executed user command.
+            _RAW_LOGGER.debug("Reconnecting after unanswered CozyLife properties request")
+            self._disconnect()
         if self._writer and not self._writer.is_closing():
             return
 
@@ -202,6 +215,7 @@ class CozyLifeDevice:
         writer = self._writer
         self._reader = None
         self._writer = None
+        self._properties_requested_at = None
         if writer:
             try:
                 writer.close()
@@ -241,6 +255,8 @@ class CozyLifeDevice:
                 if not raw_frame:
                     _RAW_LOGGER.debug("Persistent CozyLife socket reached EOF")
                     return
+                if self._reader is not reader or self._writer is not writer:
+                    return
                 try:
                     frame = json.loads(raw_frame.decode("utf8").strip())
                 except (json.JSONDecodeError, UnicodeDecodeError) as err:
@@ -265,6 +281,8 @@ class CozyLifeDevice:
 
                 state_data = message.get("data") if isinstance(message, dict) else None
                 if frame.get("res", 0) == 0 and isinstance(state_data, dict):
+                    if state_data:
+                        self._properties_requested_at = None
                     normalized_state = {
                         str(key): value for key, value in state_data.items()
                     }
@@ -444,7 +462,8 @@ class CozyLifeDevice:
         async with self._status_lock:
             return (
                 await self._async_request_state(
-                    [0], wait_for_state=False, transport_timeout=timeout
+                    [0], wait_for_state=False, transport_timeout=timeout,
+                    track_properties_response=True,
                 )
                 is not None
             )
@@ -481,6 +500,7 @@ class CozyLifeDevice:
         *,
         wait_for_state: bool,
         transport_timeout: float | None = None,
+        track_properties_response: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Use the APK write-and-listen state path over one durable socket."""
         state_waiter = None
@@ -499,6 +519,10 @@ class CozyLifeDevice:
             message = self._create_message(CMD_QUERY, {"attr": attributes})
             encoded_message = self._encode_message(message)
             _RAW_LOGGER.debug("Sending CozyLife frame: %s", summarize_frame(encoded_message))
+            if track_properties_response and self._properties_requested_at is None:
+                # Start before drain yields: the reader may deliver the reply
+                # during that await. Repeated discovery must not extend this.
+                self._properties_requested_at = time.monotonic()
             writer.write(encoded_message)
             await asyncio.wait_for(writer.drain(), timeout=timeout)
 
