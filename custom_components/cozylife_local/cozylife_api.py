@@ -243,6 +243,11 @@ class CozyLifeDevice:
             except asyncio.CancelledError:
                 pass
 
+    def _disconnect_if_current(self, writer: asyncio.StreamWriter | None) -> None:
+        """A failed operation may retire only the session it actually used."""
+        if writer is not None and self._writer is writer:
+            self._disconnect()
+
     async def _read_frames(
         self,
         reader: asyncio.StreamReader,
@@ -310,6 +315,7 @@ class CozyLifeDevice:
     async def _send_receive(self, cmd: int, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Send a frame through the persistent reader-owned connection."""
         sent_sn = None
+        writer = None
         try:
             await self._connect()
             message = self._create_message(cmd, payload)
@@ -330,13 +336,13 @@ class CozyLifeDevice:
                 # A persistent socket whose peer stopped answering is not a
                 # usable transport for the next request.  Discard it so the
                 # next attempt performs a clean local reconnect.
-                self._disconnect()
+                self._disconnect_if_current(writer)
                 return None
             finally:
                 self._pending_responses.pop(sent_sn, None)
         except (asyncio.TimeoutError, ConnectionRefusedError, OSError) as err:
             _RAW_LOGGER.debug("CozyLife request transport failure: %s", type(err).__name__)
-            self._disconnect()
+            self._disconnect_if_current(writer)
             return None
         finally:
             if sent_sn is not None:
@@ -352,6 +358,7 @@ class CozyLifeDevice:
         particular, a CMD_SET does not need a correlated response to be a
         successful device command.
         """
+        writer = None
         try:
             await self._connect()
             writer = self._writer
@@ -364,7 +371,7 @@ class CozyLifeDevice:
             await asyncio.wait_for(writer.drain(), timeout=self._timeout)
             return True
         except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
-            self._disconnect()
+            self._disconnect_if_current(writer)
             return False
 
     def _create_message(self, cmd: int, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -504,6 +511,7 @@ class CozyLifeDevice:
     ) -> Optional[Dict[str, Any]]:
         """Use the APK write-and-listen state path over one durable socket."""
         state_waiter = None
+        writer = None
         try:
             timeout = self._timeout if transport_timeout is None else transport_timeout
             await self._connect(timeout=timeout)
@@ -546,7 +554,7 @@ class CozyLifeDevice:
                 if state_waiter in self._state_waiters:
                     self._state_waiters.remove(state_waiter)
         except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
-            self._disconnect()
+            self._disconnect_if_current(writer)
             return None
         finally:
             if state_waiter is not None:

@@ -41,6 +41,9 @@ def _load_api():
     core.callback = lambda func: func
     sys.modules["homeassistant"] = homeassistant
     sys.modules["homeassistant.core"] = core
+    exceptions = types.ModuleType("homeassistant.exceptions")
+    exceptions.ConfigEntryNotReady = type("ConfigEntryNotReady", (Exception,), {})
+    sys.modules["homeassistant.exceptions"] = exceptions
     package = types.ModuleType("cozylife_local")
     package.__path__ = [str(COMPONENT_DIR)]
     sys.modules["cozylife_local"] = package
