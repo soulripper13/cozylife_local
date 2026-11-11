@@ -122,6 +122,8 @@ Supported powered devices are checked locally in the background. If a light, plu
 
 If a powered device's existing TCP connection accepts writes but delivers no state report for 30 seconds after a properties request, the next local operation replaces that connection. Further discovery announcements do not extend this timeout. Valid partial state reports, including zero values, keep the connection usable; a matching request sequence number is not required. Failed reconnects are retried by subsequent background checks. Control commands are not automatically replayed. This recovery timeout does not apply to sleeping battery sensors.
 
+An operation failing on an old connection cannot close its replacement. If a device cannot finish its initial identity query during setup, Home Assistant retries setup when connectivity returns rather than leaving a permanent setup failure. Existing configured devices do not need to be deleted or added again.
+
 ---
 
 ### Smart Plugs & Power Monitoring Outlets

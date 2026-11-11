@@ -5,6 +5,7 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import CoreState, HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryNotReady
 
 from .background_discovery import (
     DATA_DISCOVERY_SERVICE,
@@ -207,10 +208,10 @@ async def _async_setup_device_entry(hass, entry, device, discovery) -> bool:
     else:
         # No cache — must contact device (first-time setup)
         if not await device.async_update_device_info():
-            _LOGGER.error("Failed to get full device information")
-            await device.async_close()
-            _remove_debug_entry(hass, entry.entry_id)
-            return False
+            # Returning False is a terminal setup failure: no coordinator or
+            # discovery callback exists to recover when the network returns.
+            # The outer setup boundary releases resources before HA retries.
+            raise ConfigEntryNotReady("Unable to read CozyLife device information")
         # Save discovered info into config entry for future restarts
         hass.config_entries.async_update_entry(entry, data={
             **entry.data,
