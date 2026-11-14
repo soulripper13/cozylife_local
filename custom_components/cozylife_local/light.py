@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Any, Dict, Optional
 
 from homeassistant.components.light import (
@@ -42,7 +43,7 @@ COLOR_HEX = "16"
 
 def _parse_color_hex(value: Any) -> Optional[tuple[int, int]]:
     """Parse dpid 16 'HHHHSSSSVVVV' into (hue 0-360, sat 0-1000)."""
-    if not isinstance(value, str) or len(value) < 8:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{12}", value) is None:
         return None
     try:
         hue = int(value[0:4], 16)
@@ -122,7 +123,8 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
             self._supported_color_modes.add(ColorMode.ONOFF)
             return
 
-        if HUE in coordinator.device.dpid and SAT in coordinator.device.dpid:
+        if (HUE in coordinator.device.dpid and SAT in coordinator.device.dpid
+                or _parse_color_hex(coordinator.data.get(COLOR_HEX)) is not None):
             self._supported_color_modes.add(ColorMode.HS)
         if TEMP in coordinator.device.dpid:
             self._supported_color_modes.add(ColorMode.COLOR_TEMP)
@@ -159,6 +161,8 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
     @property
     def color_mode(self) -> Optional[ColorMode]:
         """Return the color mode of the light."""
+        if _parse_color_hex(self.coordinator.data.get(COLOR_HEX)) is not None:
+            return ColorMode.HS
         # The original integration determines color mode based on which values are valid (< 60000)
         # not just based on work_mode. This is critical for proper UI updates.
 
@@ -194,8 +198,7 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
         """Return the hs color value."""
         parsed = _parse_color_hex(self.coordinator.data.get(COLOR_HEX))
         if parsed is not None:
-            r, g, b = color_hs_to_RGB(parsed[0], parsed[1] / 10)
-            return color_RGB_to_hs(r, g, b)
+            return float(parsed[0]), parsed[1] / 10
 
         if HUE not in self.coordinator.data or SAT not in self.coordinator.data:
             _LOGGER.debug(f"[COZYLIFE] hs_color: HUE or SAT not in coordinator.data. Data keys: {self.coordinator.data.keys()}")
@@ -257,19 +260,22 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
             # Convert HA's 0-255 to device's 0-1000 (use round like original)
             payload[BRIGHT] = round(ha_brightness / 255 * 1000)
 
-        if ATTR_HS_COLOR in kwargs and HUE in self.coordinator.device.dpid and SAT in self.coordinator.device.dpid:
+        color_hex = _parse_color_hex(self.coordinator.data.get(COLOR_HEX)) is not None
+        if ATTR_HS_COLOR in kwargs and (
+            color_hex or HUE in self.coordinator.device.dpid and SAT in self.coordinator.device.dpid
+        ):
             hs_color = kwargs[ATTR_HS_COLOR]
-            # Do RGB round-trip conversion for color correction (from original integration)
-            r, g, b = color_hs_to_RGB(*hs_color)
-            hs_color = color_RGB_to_hs(r, g, b)
-            if COLOR_HEX in self.coordinator.data:
+            if color_hex:
                 # DreamColor: colour via dpid 16, needs work mode 0 in same frame
                 payload[WORK_MODE] = 0
                 payload[COLOR_HEX] = "%04x%04xffff" % (
-                    round(hs_color[0]) % 361,
+                    max(0, min(360, round(hs_color[0]))),
                     max(0, min(1000, round(hs_color[1] * 10))),
                 )
             else:
+                # Preserve the original conversion for ordinary DPID 5/6 lights.
+                r, g, b = color_hs_to_RGB(*hs_color)
+                hs_color = color_RGB_to_hs(r, g, b)
                 # Convert HA's Hue 0-360, Sat 0-100 to device's Hue 0-360, Sat 0-1000
                 payload[HUE] = round(hs_color[0])
                 payload[SAT] = round(hs_color[1] * 10)
