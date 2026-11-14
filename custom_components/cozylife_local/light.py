@@ -34,6 +34,25 @@ from .coordinator import CozyLifeCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+# DreamColor strips (pid v3sjfa) ignore dpid 5/6 and report/accept colour as
+# dpid 16 = "HHHHSSSSVVVV" hex (hue 0-360, sat 0-1000, VVVV=ffff). The device
+# only applies it when dpid 2 (work mode 0) is in the same command.
+COLOR_HEX = "16"
+
+
+def _parse_color_hex(value: Any) -> Optional[tuple[int, int]]:
+    """Parse dpid 16 'HHHHSSSSVVVV' into (hue 0-360, sat 0-1000)."""
+    if not isinstance(value, str) or len(value) < 8:
+        return None
+    try:
+        hue = int(value[0:4], 16)
+        sat = int(value[4:8], 16)
+    except ValueError:
+        return None
+    if hue > 360 or sat > 1000:
+        return None
+    return hue, sat
+
 
 def _kelvin_range_for_pid(pid: str | None) -> tuple[int, int]:
     """Return the default Kelvin range for a light model."""
@@ -173,6 +192,11 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
     @property
     def hs_color(self) -> Optional[tuple[float, float]]:
         """Return the hs color value."""
+        parsed = _parse_color_hex(self.coordinator.data.get(COLOR_HEX))
+        if parsed is not None:
+            r, g, b = color_hs_to_RGB(parsed[0], parsed[1] / 10)
+            return color_RGB_to_hs(r, g, b)
+
         if HUE not in self.coordinator.data or SAT not in self.coordinator.data:
             _LOGGER.debug(f"[COZYLIFE] hs_color: HUE or SAT not in coordinator.data. Data keys: {self.coordinator.data.keys()}")
             return None
@@ -238,9 +262,17 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
             # Do RGB round-trip conversion for color correction (from original integration)
             r, g, b = color_hs_to_RGB(*hs_color)
             hs_color = color_RGB_to_hs(r, g, b)
-            # Convert HA's Hue 0-360, Sat 0-100 to device's Hue 0-360, Sat 0-1000
-            payload[HUE] = round(hs_color[0])
-            payload[SAT] = round(hs_color[1] * 10)
+            if COLOR_HEX in self.coordinator.data:
+                # DreamColor: colour via dpid 16, needs work mode 0 in same frame
+                payload[WORK_MODE] = 0
+                payload[COLOR_HEX] = "%04x%04xffff" % (
+                    round(hs_color[0]) % 361,
+                    max(0, min(1000, round(hs_color[1] * 10))),
+                )
+            else:
+                # Convert HA's Hue 0-360, Sat 0-100 to device's Hue 0-360, Sat 0-1000
+                payload[HUE] = round(hs_color[0])
+                payload[SAT] = round(hs_color[1] * 10)
 
         if ATTR_COLOR_TEMP_KELVIN in kwargs and TEMP in self.coordinator.device.dpid:
             ha_kelvin = kwargs[ATTR_COLOR_TEMP_KELVIN]
