@@ -53,9 +53,8 @@ async def async_setup_entry(
         or (coordinator.classification.is_gateway and "2" in dpids)
     ):
         _LOGGER.debug(
-            "Device %s (Type: %s, Source: %s) does not support switch entities, "
+            "Device (Type: %s, Source: %s) does not support switch entities, "
             "skipping switch platform setup.",
-            coordinator.device.ip_address,
             coordinator.classification.effective_type_code,
             coordinator.classification.source,
         )
@@ -65,10 +64,9 @@ async def async_setup_entry(
     if coordinator.classification.supports_switch_entities:
         entity_count = coordinator.classification.switch_entity_count
         _LOGGER.info(
-            "Detected %s %s entity/entities at %s with DPIDs: %s",
+            "Detected %s %s entity/entities with DPIDs: %s",
             entity_count,
             "outlet" if coordinator.classification.is_outlet else "switch",
-            coordinator.device.ip_address,
             coordinator.device.dpid,
         )
 
