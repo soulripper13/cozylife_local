@@ -92,7 +92,9 @@ class CozyLifeCountdownNumberBase(
         except (TypeError, ValueError, OverflowError):
             return None
 
-        return max(0, min(MAX_COUNTDOWN_SECONDS, value))
+        if isinstance(raw, float) and raw != value:
+            return None
+        return value if 0 <= value <= MAX_COUNTDOWN_SECONDS else None
 
     async def async_set_native_value(self, value: float) -> None:
         countdown = max(0, min(MAX_COUNTDOWN_SECONDS, int(value)))

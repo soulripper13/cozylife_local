@@ -29,7 +29,7 @@ def test_binary_configuration_does_not_interpret_unknown_as_enabled():
             assert scope["is_on"](switch) is expected
 
 
-def test_video_event_clear_is_not_an_active_alarm():
+def test_contact_motion_and_video_reports_use_their_own_enums():
     tree = ast.parse((COMPONENT_DIR / "binary_sensor.py").read_text())
     getter = next(node for entity in tree.body if isinstance(entity, ast.ClassDef)
                   for node in entity.body
@@ -43,6 +43,13 @@ def test_video_event_clear_is_not_an_active_alarm():
         instance._description = SimpleNamespace(dpid=dpid)
         for raw, expected in ((1, True), ("1", True), (2, False), ("2", False),
                               (0, False), (None, None), ("offline", None)):
+            data[dpid] = raw
+            assert scope["is_on"](instance) is expected
+
+    for dpid in ("6", "7"):
+        instance._description = SimpleNamespace(dpid=dpid)
+        for raw, expected in ((1, True), ("1", True), (0, False), ("0", False),
+                              (2, None), (-1, None), (None, None)):
             data[dpid] = raw
             assert scope["is_on"](instance) is expected
 
@@ -87,7 +94,7 @@ def test_relay_bitmask_rejects_malformed_reports_and_preserves_other_gangs():
     assert scope["is_on"](instance) is None
     asyncio.run(scope["_async_set_gang_state"](instance, True))
     sender.assert_not_awaited()
-    for raw in (None, "offline", -1, {}, 1.5):
+    for raw in (None, "offline", -1, {}, 1.5, True, False):
         state["1"] = raw
         assert scope["is_on"](instance) is None
         asyncio.run(scope["_async_set_gang_state"](instance, True))
@@ -125,6 +132,8 @@ def test_relay_bitmask_rejects_malformed_reports_and_preserves_other_gangs():
     state.clear()
     asyncio.run(scope["_async_set_gang_state"](instance, False))
     single_sender.assert_awaited_once_with({"1": 0})
+    state["1"] = True
+    assert scope["is_on"](instance) is True
 
 
 def test_battery_measurements_and_restored_values_stay_in_percentage_range():
@@ -176,7 +185,9 @@ def test_native_value_handles_missing_malformed_and_valid_telemetry():
     getter = next(node for node in entity.body
                   if isinstance(node, ast.FunctionDef) and node.name == "native_value")
     getter.decorator_list = []
-    scope = {"Optional": Optional, "isfinite": isfinite}
+    scope = {"Optional": Optional, "isfinite": isfinite,
+             "PLUG_ADDED_ENERGY": "26", "PLUG_ENERGY": "42",
+             "PLUG_CURRENT": "27", "PLUG_POWER": "28", "PLUG_VOLTAGE": "29"}
     exec(compile(ast.Module(body=[getter], type_ignores=[]), "sensor.py", "exec"), scope)
     instance = SimpleNamespace(
         coordinator=SimpleNamespace(data={}),
@@ -205,9 +216,103 @@ def test_countdown_rejects_invalid_reports_and_preserves_zero_seconds():
     instance = SimpleNamespace(
         coordinator=SimpleNamespace(data=state), _countdown_dpid="13"
     )
-    for raw in (True, False, float("inf"), float("nan"), "offline"):
+    for raw in (True, False, float("inf"), float("nan"), "offline", -1, 86401, 0.5):
         state["13"] = raw
         assert scope["native_value"](instance) is None
-    for raw, expected in ((0, 0), ("3600", 3600), (3660, 3660)):
+    for raw, expected in ((0, 0), ("3600", 3600), (3660, 3660), (86400, 86400)):
         state["13"] = raw
         assert scope["native_value"](instance) == expected
+
+
+def test_select_reports_require_an_exact_enum_value():
+    tree = ast.parse((COMPONENT_DIR / "select.py").read_text())
+    decoder = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                   and node.name == "_option_from_report")
+    scope = {}
+    exec(compile(ast.Module(body=[decoder], type_ignores=[]), "select.py", "exec"), scope)
+    decode = scope["_option_from_report"]
+    for options in ({0: "Off", 1: "On", 2: "Previous state"},
+                    {0: "Off", 1: "State", 2: "Locator"},
+                    {1: "Happy", 2: "Sad"}):
+        for value, label in options.items():
+            assert decode(value, options) == label
+            assert decode(str(value), options) == label
+        for invalid in (True, False, 1.5, float("inf"), float("nan"), 99, "offline", None):
+            assert decode(invalid, options) is None
+
+
+def test_unsigned_plug_measurements_preserve_scale_and_reject_negative_values():
+    tree = ast.parse((COMPONENT_DIR / "sensor.py").read_text())
+    entity = next(node for node in tree.body if isinstance(node, ast.ClassDef)
+                  and node.name == "CozyLifePlugSensor")
+    getter = next(node for node in entity.body if isinstance(node, ast.FunctionDef)
+                  and node.name == "native_value")
+    getter.decorator_list = []
+    scope = {"Optional": Optional, "isfinite": isfinite,
+             "PLUG_ADDED_ENERGY": "26", "PLUG_ENERGY": "42",
+             "PLUG_CURRENT": "27", "PLUG_POWER": "28", "PLUG_VOLTAGE": "29"}
+    exec(compile(ast.Module(body=[getter], type_ignores=[]), "sensor.py", "exec"), scope)
+    for dpid in ("26", "42"):
+        sensor = SimpleNamespace(
+            coordinator=SimpleNamespace(data={}),
+            _description=SimpleNamespace(dpid=dpid, scale=1000, offset=0),
+        )
+        for raw, expected in ((904, 0.904), (1, 0.001), (0, 0.0), (-1, None)):
+            sensor.coordinator.data[dpid] = raw
+            assert scope["native_value"](sensor) == expected
+
+    for dpid, raw in (("27", 1250), ("28", 133.5), ("29", 113)):
+        sensor = SimpleNamespace(
+            coordinator=SimpleNamespace(data={dpid: raw}),
+            _description=SimpleNamespace(dpid=dpid, scale=1, offset=0),
+        )
+        assert scope["native_value"](sensor) == raw
+        sensor.coordinator.data[dpid] = 0
+        assert scope["native_value"](sensor) == 0
+        sensor.coordinator.data[dpid] = -1
+        assert scope["native_value"](sensor) is None
+
+    sensor = SimpleNamespace(
+        coordinator=SimpleNamespace(data={}),
+        _description=SimpleNamespace(dpid="102", scale=10, offset=0),
+    )
+    for raw, expected in ((0, 0), (857, 85.7), (1000, 100), (-1, None), (1001, None)):
+        sensor.coordinator.data["102"] = raw
+        assert scope["native_value"](sensor) == expected
+
+
+def test_contact_profiles_expose_only_the_verified_battery_measurement():
+    tree = ast.parse((COMPONENT_DIR / "sensor.py").read_text())
+    setup = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)
+                 and node.name == "async_setup_entry")
+    models = next(node for node in tree.body if isinstance(node, ast.Assign)
+                  and any(isinstance(target, ast.Name)
+                          and target.id == "_CONTACT_BATTERY_PIDS" for target in node.targets))
+    scope = {
+        "DOMAIN": "cozylife_local", "SENSOR_BATTERY": "9",
+        "HomeAssistant": object, "ConfigEntry": object,
+        "CozyLifeIPAddressSensor": lambda *_: "IP address",
+        "CozyLifeBatterySensor": lambda *_: "Battery",
+    }
+    exec(compile(ast.Module(body=[models, setup], type_ignores=[]), "sensor.py", "exec"), scope)
+    entry = SimpleNamespace(entry_id="entry")
+    coordinator = SimpleNamespace(
+        classification=SimpleNamespace(
+            is_local_transport=True, is_environment_sensor=False,
+            is_multi_sensor=False, supports_plug_metering=False,
+            is_energy_storage=False, is_video_intercom=False,
+        ),
+        device=SimpleNamespace(pid="0iDvw9", dpid=["7", "9"]),
+    )
+    hass = SimpleNamespace(data={"cozylife_local": {"entry": coordinator}})
+    for pid, dpids, expected in (
+        ("0iDvw9", ["7", "9"], ["IP address", "Battery"]),
+        ("o64g7o", ["7", "9"], ["IP address", "Battery"]),
+        ("t7x7Uz", ["7"], ["IP address"]),
+        ("unverified", ["7", "9"], ["IP address"]),
+    ):
+        coordinator.device.pid = pid
+        coordinator.device.dpid = dpids
+        entities = []
+        asyncio.run(scope["async_setup_entry"](hass, entry, entities.extend))
+        assert entities == expected

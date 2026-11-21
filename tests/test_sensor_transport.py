@@ -2018,6 +2018,23 @@ def test_powered_device_accepts_apk_style_async_state_report() -> None:
     asyncio.run(exercise())
 
 
+def test_motion_only_report_survives_the_environment_measurement_gate():
+    coordinator = object.__new__(_load_coordinator())
+    coordinator._uses_sensor_polling = True
+    coordinator.classification = types.SimpleNamespace(is_environment_sensor=True)
+    coordinator.device = types.SimpleNamespace(pid="JTFMlo")
+    coordinator.data = {"8": 210, "4": 45}
+    coordinator.async_set_updated_data = lambda data: setattr(coordinator, "data", data)
+
+    async def exercise():
+        for state in (1, 0, "1"):
+            await coordinator._async_handle_device_message({"msg": {"data": {"6": state}}})
+            assert coordinator.data == {"8": 210, "4": 45, "6": state}
+        await coordinator._async_handle_device_message({"msg": {"data": {"6": 2, "8": None}}})
+        assert coordinator.data == {"8": 210, "4": 45, "6": "1"}
+
+    asyncio.run(exercise())
+
 def test_environment_report_accepts_a_valid_partial_measurement() -> None:
     """A valid reading must not be discarded because its paired DPID is absent."""
     CozyLifeCoordinator = _load_coordinator()

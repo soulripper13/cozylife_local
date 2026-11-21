@@ -389,3 +389,26 @@ def test_sleeping_sensor_silence_does_not_start_powered_watchdog():
             await device.async_close()
 
     asyncio.run(exercise())
+
+
+def test_separate_white_reports_supersede_cached_packed_white():
+    Coordinator = _load_coordinator()
+    coordinator = object.__new__(Coordinator)
+    coordinator._uses_sensor_polling = False
+    coordinator.data = {"16": "FFFFFFFF01F4"}
+    coordinator.async_set_updated_data = lambda data: setattr(coordinator, "data", data)
+
+    async def exercise():
+        async def report(data):
+            await coordinator._async_handle_device_message({"msg": {"data": data}})
+
+        await report({"3": 65535})
+        assert coordinator.data["16"] == "FFFFFFFF01F4"
+        await report({"3": 0})
+        assert coordinator.data == {"3": 0}
+        await report({"16": "ffffffff03e8"})
+        assert coordinator.data == {"3": 0, "16": "ffffffff03e8"}
+        await report({"3": 100, "16": "ffffffff0200"})
+        assert coordinator.data == {"3": 100, "16": "ffffffff0200"}
+
+    asyncio.run(exercise())

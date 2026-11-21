@@ -365,6 +365,13 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._uses_sensor_polling and not self._has_valid_environment_measurements(
             received_state
         ):
+            if (
+                getattr(getattr(self, "device", None), "pid", None) == "JTFMlo"
+                and received_state.get("6") in (0, 1, "0", "1")
+            ):
+                # This environmental profile also exposes a separate motion report.
+                self.async_set_updated_data({**(self.data or {}), "6": received_state["6"]})
+                return
             measurement_diagnostics = {
                 dpid: {
                     "present": dpid in received_state,
@@ -385,8 +392,16 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Device state reports can be partial.  The APK delivers them to the
         # device listener as updates, rather than discarding the prior state.
         state_data = {**(self.data or {}), **received_state}
+        cached_color = state_data.get("16")
+        # A standalone white update must supersede an older packed white value.
+        # Keep the existing v3sjfa handling for cached packed HS as well.
         if (
-            getattr(getattr(self, "device", None), "pid", None) == "v3sjfa"
+            (
+                getattr(getattr(self, "device", None), "pid", None) == "v3sjfa"
+                or isinstance(cached_color, str)
+                and len(cached_color) == 12
+                and cached_color[:8].lower() == "ffffffff"
+            )
             and "16" not in received_state
             and type(received_state.get("3")) in (int, float)
             and 0 <= received_state["3"] <= 1000

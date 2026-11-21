@@ -185,6 +185,12 @@ class CozyLifeBinarySensor(CoordinatorEntity[CozyLifeCoordinator], BinarySensorE
             if raw in (2, "2", 0, "0"):
                 return False
             return None
+        if self._description.dpid in {"6", "7"}:
+            if raw in (1, "1"):
+                return True
+            if raw in (0, "0"):
+                return False
+            return None
         return _coerce_binary_state(raw)
 
     @callback

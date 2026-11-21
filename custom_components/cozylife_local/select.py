@@ -45,6 +45,18 @@ AI_EXPRESSION_VALUES = {
 }
 
 
+def _option_from_report(raw: object, options: dict[int, str]) -> str | None:
+    """Decode an exact numeric option from a device report."""
+    if isinstance(raw, str):
+        try:
+            raw = int(raw)
+        except ValueError:
+            return None
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    return options.get(raw)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -111,10 +123,7 @@ class CozyLifePowerOnStateSelect(
     def current_option(self) -> str | None:
         """Return the selected power-on state."""
         raw = self.coordinator.data.get(PLUG_POWER_ON_STATE)
-        try:
-            return POWER_ON_STATE_VALUES.get(int(raw))
-        except (TypeError, ValueError):
-            return None
+        return _option_from_report(raw, POWER_ON_STATE_VALUES)
 
     async def async_select_option(self, option: str) -> None:
         """Set the power-on restore behavior."""
@@ -161,10 +170,7 @@ class CozyLifeLedStatusSelect(
     def current_option(self) -> str | None:
         """Return the selected LED behavior."""
         raw = self.coordinator.data.get(PLUG_LED_STATUS)
-        try:
-            return LED_STATUS_VALUES.get(int(raw))
-        except (TypeError, ValueError):
-            return None
+        return _option_from_report(raw, LED_STATUS_VALUES)
 
     async def async_select_option(self, option: str) -> None:
         """Set the indicator LED behavior."""
@@ -209,12 +215,9 @@ class CozyLifeAiExpressionSelect(
 
     @property
     def current_option(self) -> str | None:
-        """Return the expression value reported by the local S3 panel."""
+        """Return the current expression from the coordinator's DPID state."""
         raw = self.coordinator.data.get("211")
-        try:
-            return AI_EXPRESSION_VALUES.get(int(raw))
-        except (TypeError, ValueError):
-            return None
+        return _option_from_report(raw, AI_EXPRESSION_VALUES)
 
     async def async_select_option(self, option: str) -> None:
         """Set the local expression through the verified panel DPID."""
@@ -223,10 +226,7 @@ class CozyLifeAiExpressionSelect(
             self.coordinator.data["211"] = value
             self.async_write_ha_state()
         else:
-            _LOGGER.warning(
-                "Failed to set expression for CozyLife device %s",
-                self.coordinator.device.ip_address,
-            )
+            _LOGGER.warning("Failed to set CozyLife expression")
 
     @callback
     def _handle_coordinator_update(self) -> None:

@@ -8,8 +8,9 @@ meaning and a safe Home Assistant entity mapping.
 New discovery entries require the Wi-Fi marker. Existing entries retain the
 legacy classifier for compatibility with older or incomplete catalogue data.
 
-New discovery entries require the Wi-Fi marker. Existing entries retain the
-legacy classifier for compatibility with older or incomplete catalogue data.
+For the retained door-contact panel, DPID 7 reports open/closed and
+DPID 9 reports charge in tenths of a percent. These contact profiles
+expose a battery diagnostic when the device advertises DPID 9.
 
 ## Implemented local families
 
