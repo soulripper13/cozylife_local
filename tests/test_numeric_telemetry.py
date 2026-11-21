@@ -8,6 +8,26 @@ from typing import Optional
 from test_sensor_transport import COMPONENT_DIR
 
 
+def test_battery_measurements_and_restored_values_stay_in_percentage_range():
+    tree = ast.parse((COMPONENT_DIR / "sensor.py").read_text())
+    battery = next(node for node in tree.body if isinstance(node, ast.ClassDef)
+                   and node.name == "CozyLifeBatterySensor")
+    methods = [node for node in battery.body if isinstance(node, ast.FunctionDef)
+               and node.name in {"_native_value_from_data", "_is_valid_native_value"}]
+    scope = {"Optional": Optional, "SENSOR_BATTERY": "9"}
+    exec(compile(ast.Module(body=methods, type_ignores=[]), "sensor.py", "exec"), scope)
+    data = {}
+    instance = SimpleNamespace(coordinator=SimpleNamespace(data=data))
+    for raw in (True, "offline", -1, 1001, float("inf"), float("nan")):
+        data["9"] = raw
+        assert scope["_native_value_from_data"](instance) is None
+    for raw in (0, 559, 1000):
+        data["9"] = raw
+        assert scope["_native_value_from_data"](instance) == raw / 10
+    for restored in (-1, 101, float("inf"), float("nan")):
+        assert not scope["_is_valid_native_value"](instance, restored)
+
+
 def test_speaker_source_only_accepts_the_panel_enum():
     tree = ast.parse((COMPONENT_DIR / "media_player.py").read_text())
     sources = next(node for node in tree.body if isinstance(node, ast.Assign)

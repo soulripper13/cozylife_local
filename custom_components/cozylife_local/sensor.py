@@ -440,9 +440,16 @@ class CozyLifeBatterySensor(CozyLifeSensorBase):
 
     def _native_value_from_data(self) -> Optional[float]:
         raw = (self.coordinator.data or {}).get(SENSOR_BATTERY)
-        if raw is None:
+        if (
+            isinstance(raw, bool)
+            or not isinstance(raw, (int, float))
+            or not 0 <= raw <= 1000
+        ):
             return None
         return round(raw / 10, 1)
+
+    def _is_valid_native_value(self, value: float) -> bool:
+        return 0 <= value <= 100
 
 
 class CozyLifePlugSensor(CoordinatorEntity[CozyLifeCoordinator], SensorEntity):
