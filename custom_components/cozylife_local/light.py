@@ -262,6 +262,16 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
             ha_brightness = kwargs[ATTR_BRIGHTNESS]
             # Convert HA's 0-255 to device's 0-1000 (use round like original)
             payload[BRIGHT] = round(ha_brightness / 255 * 1000)
+            if (
+                self.coordinator.device.pid == "kHap0G"
+                and ATTR_HS_COLOR not in kwargs
+                and ATTR_COLOR_TEMP_KELVIN not in kwargs
+            ):
+                # This model's panel pairs brightness with the current
+                # scene tab's mode. Preserve it when the device reports it.
+                mode = self.coordinator.data.get(WORK_MODE)
+                if mode in (6, 7, 8):
+                    payload[WORK_MODE] = mode
 
         color_hex = (
             self.coordinator.device.pid == "v3sjfa"

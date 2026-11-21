@@ -137,3 +137,19 @@ def test_brightness_reports_respect_the_wire_scale():
     for raw, expected in ((0, 0), (500, 127), (1000, 255)):
         light.coordinator.data["4"] = raw
         assert light.brightness == expected
+
+
+def test_multimode_light_brightness_preserves_reported_panel_mode():
+    module = _light_module()
+    for mode in (6, 7, 8):
+        light = _entity(module, {"2": mode}, ("1", "2", "4"), pid="kHap0G")
+        asyncio.run(light.async_turn_on(brightness=128))
+        light.coordinator.device.async_set_state.assert_awaited_once_with(
+            {"1": 1, "2": mode, "4": 502}
+        )
+    for pid, data in (("kHap0G", {}), ("legacy", {"2": 7})):
+        light = _entity(module, data, ("1", "2", "4"), pid=pid)
+        asyncio.run(light.async_turn_on(brightness=128))
+        light.coordinator.device.async_set_state.assert_awaited_once_with(
+            {"1": 1, "2": 0, "4": 502}
+        )
