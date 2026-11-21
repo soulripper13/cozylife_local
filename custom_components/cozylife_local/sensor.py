@@ -1,4 +1,5 @@
 import logging
+from math import isfinite
 from typing import Optional
 
 from homeassistant.components.sensor import (
@@ -470,10 +471,12 @@ class CozyLifePlugSensor(CoordinatorEntity[CozyLifeCoordinator], SensorEntity):
     @property
     def native_value(self) -> Optional[float]:
         raw = self.coordinator.data.get(self._description.dpid)
-        if raw is None:
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
             return None
 
         value = raw / self._description.scale + self._description.offset
+        if not isfinite(value):
+            return None
         if self._description.scale == 1:
             return float(value)
         return round(value, 3)
