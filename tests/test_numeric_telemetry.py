@@ -80,11 +80,13 @@ def test_relay_bitmask_rejects_malformed_reports_and_preserves_other_gangs():
     state = {}
     instance = SimpleNamespace(
         coordinator=SimpleNamespace(data=state, device=SimpleNamespace(async_set_state=sender)),
-        _gang_bit=0, async_write_ha_state=lambda: None,
+        _gang_bit=0, _total_entities=2, async_write_ha_state=lambda: None,
     )
     instance.coordinator.relay_write_lock = asyncio.Lock()
     instance._async_write_gang_mask = lambda enabled: scope["_async_write_gang_mask"](instance, enabled)
     assert scope["is_on"](instance) is None
+    asyncio.run(scope["_async_set_gang_state"](instance, True))
+    sender.assert_not_awaited()
     for raw in (None, "offline", -1, {}, 1.5):
         state["1"] = raw
         assert scope["is_on"](instance) is None
@@ -107,6 +109,7 @@ def test_relay_bitmask_rejects_malformed_reports_and_preserves_other_gangs():
 
         instance.coordinator.device.async_set_state = send
         second = SimpleNamespace(coordinator=instance.coordinator, _gang_bit=1,
+                                 _total_entities=2,
                                  async_write_ha_state=lambda: None)
         second._async_write_gang_mask = lambda enabled: scope["_async_write_gang_mask"](second, enabled)
         await asyncio.gather(scope["_async_set_gang_state"](instance, True),
@@ -115,6 +118,13 @@ def test_relay_bitmask_rejects_malformed_reports_and_preserves_other_gangs():
         assert state["1"] == 3
 
     asyncio.run(simultaneous())
+
+    single_sender = AsyncMock(return_value=True)
+    instance._total_entities = 1
+    instance.coordinator.device.async_set_state = single_sender
+    state.clear()
+    asyncio.run(scope["_async_set_gang_state"](instance, False))
+    single_sender.assert_awaited_once_with({"1": 0})
 
 
 def test_battery_measurements_and_restored_values_stay_in_percentage_range():

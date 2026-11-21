@@ -179,7 +179,10 @@ class CozyLifeSwitch(CoordinatorEntity[CozyLifeCoordinator], SwitchEntity):
             await self._async_write_gang_mask(new_gang_state)
 
     async def _async_write_gang_mask(self, new_gang_state: bool) -> None:
-        current_bitmask = self.coordinator.data.get(BITMASK_DPID, 0)
+        current_bitmask = self.coordinator.data.get(BITMASK_DPID)
+        if current_bitmask is None and self._total_entities == 1:
+            # A single relay can be set without knowing its previous state.
+            current_bitmask = 0 if new_gang_state else 1
         if not isinstance(current_bitmask, int) or current_bitmask < 0:
             # A replacement bitmask must not clear other gangs based on invalid state.
             return
