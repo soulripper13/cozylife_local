@@ -273,9 +273,11 @@ class CozyLifeDpidSwitch(CoordinatorEntity[CozyLifeCoordinator], SwitchEntity):
     @property
     def is_on(self) -> bool | None:
         raw = self.coordinator.data.get(self._dpid)
-        if raw is None:
-            return None
-        return raw not in (0, "0", False, "off", "false")
+        if raw in (0, "0", "off", "false"):
+            return False
+        if raw in (1, "1", "on", "true"):
+            return True
+        return None
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         if await self.coordinator.device.async_set_state({self._dpid: 1}):

@@ -10,6 +10,25 @@ from unittest.mock import AsyncMock
 from test_sensor_transport import COMPONENT_DIR
 
 
+def test_binary_configuration_does_not_interpret_unknown_as_enabled():
+    tree = ast.parse((COMPONENT_DIR / "switch.py").read_text())
+    entity = next(node for node in tree.body if isinstance(node, ast.ClassDef)
+                  and node.name == "CozyLifeDpidSwitch")
+    getter = next(node for node in entity.body if isinstance(node, ast.FunctionDef)
+                  and node.name == "is_on")
+    getter.decorator_list = []
+    scope = {}
+    exec(compile(ast.Module(body=[getter], type_ignores=[]), "switch.py", "exec"), scope)
+    data = {}
+    switch = SimpleNamespace(coordinator=SimpleNamespace(data=data))
+    for dpid in ("2", "9"):
+        switch._dpid = dpid
+        for raw, expected in ((0, False), ("off", False), (1, True), ("true", True),
+                              (2, None), ("offline", None), (None, None)):
+            data[dpid] = raw
+            assert scope["is_on"](switch) is expected
+
+
 def test_video_event_clear_is_not_an_active_alarm():
     tree = ast.parse((COMPONENT_DIR / "binary_sensor.py").read_text())
     getter = next(node for entity in tree.body if isinstance(entity, ast.ClassDef)
