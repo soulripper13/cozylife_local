@@ -53,9 +53,8 @@ async def async_setup_entry(
         or (coordinator.classification.is_gateway and "2" in dpids)
     ):
         _LOGGER.debug(
-            "Device %s (Type: %s, Source: %s) does not support switch entities, "
+            "Device (Type: %s, Source: %s) does not support switch entities, "
             "skipping switch platform setup.",
-            coordinator.device.ip_address,
             coordinator.classification.effective_type_code,
             coordinator.classification.source,
         )
@@ -65,10 +64,9 @@ async def async_setup_entry(
     if coordinator.classification.supports_switch_entities:
         entity_count = coordinator.classification.switch_entity_count
         _LOGGER.info(
-            "Detected %s %s entity/entities at %s with DPIDs: %s",
+            "Detected %s %s entity/entities with DPIDs: %s",
             entity_count,
             "outlet" if coordinator.classification.is_outlet else "switch",
-            coordinator.device.ip_address,
             coordinator.device.dpid,
         )
 
@@ -165,17 +163,37 @@ class CozyLifeSwitch(CoordinatorEntity[CozyLifeCoordinator], SwitchEntity):
         )
 
     @property
-    def is_on(self) -> bool:
+    def is_on(self) -> bool | None:
         """Return true if this switch gang's bit is set in the bitmask."""
         # Get the integer value of the bitmask from the coordinator's data.
-        bitmask_state = self.coordinator.data.get(BITMASK_DPID, 0)
+        bitmask_state = self.coordinator.data.get(BITMASK_DPID)
+        if (
+            not isinstance(bitmask_state, int)
+            or bitmask_state < 0
+            or (isinstance(bitmask_state, bool) and self._total_entities != 1)
+        ):
+            return None
         
         # Check if the bit for this gang is set.
         return (bitmask_state & (1 << self._gang_bit)) != 0
 
     async def _async_set_gang_state(self, new_gang_state: bool) -> None:
         """Calculate and send the new bitmask state, then optimistically update."""
-        current_bitmask = self.coordinator.data.get(BITMASK_DPID, 0)
+        async with self.coordinator.relay_write_lock:
+            await self._async_write_gang_mask(new_gang_state)
+
+    async def _async_write_gang_mask(self, new_gang_state: bool) -> None:
+        current_bitmask = self.coordinator.data.get(BITMASK_DPID)
+        if current_bitmask is None and self._total_entities == 1:
+            # A single relay can be set without knowing its previous state.
+            current_bitmask = 0 if new_gang_state else 1
+        if (
+            not isinstance(current_bitmask, int)
+            or current_bitmask < 0
+            or (isinstance(current_bitmask, bool) and self._total_entities != 1)
+        ):
+            # A replacement bitmask must not clear other gangs based on invalid state.
+            return
         
         if new_gang_state:
             # To turn on, perform a bitwise OR.
@@ -266,9 +284,11 @@ class CozyLifeDpidSwitch(CoordinatorEntity[CozyLifeCoordinator], SwitchEntity):
     @property
     def is_on(self) -> bool | None:
         raw = self.coordinator.data.get(self._dpid)
-        if raw is None:
-            return None
-        return raw not in (0, "0", False, "off", "false")
+        if raw in (0, "0", "off", "false"):
+            return False
+        if raw in (1, "1", "on", "true"):
+            return True
+        return None
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         if await self.coordinator.device.async_set_state({self._dpid: 1}):
@@ -314,9 +334,11 @@ class CozyLifePlugBooleanSwitch(
     def is_on(self) -> bool | None:
         """Return whether overcurrent protection is enabled."""
         raw = self.coordinator.data.get(PLUG_OVERCURRENT_PROTECTION)
-        if raw is None:
-            return None
-        return bool(raw)
+        if raw in (0, "0"):
+            return False
+        if raw in (1, "1"):
+            return True
+        return None
 
     async def _async_set_state(self, enabled: bool) -> None:
         value = 1 if enabled else 0
@@ -326,10 +348,7 @@ class CozyLifePlugBooleanSwitch(
             self.coordinator.data[PLUG_OVERCURRENT_PROTECTION] = value
             self.async_write_ha_state()
         else:
-            _LOGGER.warning(
-                "Failed to set overcurrent protection for CozyLife device %s",
-                self.coordinator.device.ip_address,
-            )
+            _LOGGER.warning("Failed to set CozyLife overcurrent protection")
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable overcurrent protection."""

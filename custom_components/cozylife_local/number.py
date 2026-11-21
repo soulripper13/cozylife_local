@@ -84,15 +84,17 @@ class CozyLifeCountdownNumberBase(
     @property
     def native_value(self) -> int | None:
         raw = self.coordinator.data.get(self._countdown_dpid)
-        if raw is None:
+        if raw is None or isinstance(raw, bool):
             return None
 
         try:
             value = int(raw)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return None
 
-        return max(0, min(MAX_COUNTDOWN_SECONDS, value))
+        if isinstance(raw, float) and raw != value:
+            return None
+        return value if 0 <= value <= MAX_COUNTDOWN_SECONDS else None
 
     async def async_set_native_value(self, value: float) -> None:
         countdown = max(0, min(MAX_COUNTDOWN_SECONDS, int(value)))
@@ -104,10 +106,8 @@ class CozyLifeCountdownNumberBase(
             self.async_write_ha_state()
         else:
             _LOGGER.warning(
-                "Failed to set %s countdown for CozyLife device %s to %s seconds",
+                "Failed to set CozyLife %s countdown",
                 self._device_kind,
-                self.coordinator.device.ip_address,
-                countdown,
             )
 
     async def _async_after_countdown_set(self, countdown: int) -> None:

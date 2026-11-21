@@ -53,8 +53,8 @@ def _light_module():
     return types.SimpleNamespace(**namespace)
 
 
-def _entity(module, state, dpids=("1", "2", "3", "4", "5", "6", "16")):
-    device = types.SimpleNamespace(pid="v3sjfa", dpid=list(dpids), device_id="test",
+def _entity(module, state, dpids=("1", "2", "3", "4", "5", "6", "16"), *, pid="legacy"):
+    device = types.SimpleNamespace(pid=pid, dpid=list(dpids), device_id="test",
                                    async_set_state=AsyncMock(return_value=True))
     coordinator = types.SimpleNamespace(device=device, data=dict(state))
     return module.CozyLifeLight(coordinator, types.SimpleNamespace(data={}, options={}))
@@ -119,3 +119,98 @@ def test_temperature_brightness_onoff_and_failed_writes_are_preserved():
     before = dict(dream.coordinator.data)
     asyncio.run(dream.async_turn_on(hs_color=(120, 100)))
     assert dream.coordinator.data == before
+
+
+def test_verified_strip_uses_dpid16_before_first_report():
+    light = _entity(_light_module(), {}, pid="v3sjfa")
+    asyncio.run(light.async_turn_on(hs_color=(120, 100)))
+    light.coordinator.device.async_set_state.assert_awaited_once_with(
+        {"1": 1, "2": 0, "16": "007803e8ffff"}
+    )
+
+
+def test_brightness_reports_respect_the_wire_scale():
+    light = _entity(_light_module(), {})
+    for invalid in (True, "offline", -1, 1001, float("inf"), float("nan")):
+        light.coordinator.data["4"] = invalid
+        assert light.brightness is None
+    for raw, expected in ((0, 0), (500, 127), (1000, 255)):
+        light.coordinator.data["4"] = raw
+        assert light.brightness == expected
+
+
+def test_multimode_light_brightness_preserves_reported_panel_mode():
+    module = _light_module()
+    for mode in (6, 7, 8):
+        light = _entity(module, {"2": mode}, ("1", "2", "4"), pid="kHap0G")
+        asyncio.run(light.async_turn_on(brightness=128))
+        light.coordinator.device.async_set_state.assert_awaited_once_with(
+            {"1": 1, "2": mode, "4": 502}
+        )
+    for pid, data in (("kHap0G", {}), ("legacy", {"2": 7})):
+        light = _entity(module, data, ("1", "2", "4"), pid=pid)
+        asyncio.run(light.async_turn_on(brightness=128))
+        light.coordinator.device.async_set_state.assert_awaited_once_with(
+            {"1": 1, "2": 0, "4": 502}
+        )
+
+
+@pytest.mark.parametrize(
+    ("report", "expected"),
+    [(0, False), (1, True), (255, True), ("0", False), ("1", True),
+     (None, None), ({}, None), ("invalid", None)],
+)
+def test_light_power_reports(report, expected):
+    module = _light_module()
+    light = _entity(module, {"1": report}, ("1",))
+    assert light.is_on is expected
+
+
+@pytest.mark.parametrize("invalid", [None, "123", True, -1, 1001, float("inf"), float("nan"), 65535])
+def test_invalid_legacy_colour_and_temperature_reports(invalid):
+    module = _light_module()
+    light = _entity(module, {"5": 120, "6": invalid, "3": 500})
+    assert light.hs_color is None
+    assert light.color_mode == module.ColorMode.COLOR_TEMP
+    assert light.color_temp_kelvin is not None
+
+    light = _entity(module, {"5": invalid, "6": 1000, "3": invalid})
+    assert light.hs_color is None
+    assert light.color_temp_kelvin is None
+
+
+@pytest.mark.parametrize("temperature", [0, 500, 1000])
+def test_whole_strip_white_report_overrides_stale_legacy_color(temperature):
+    module = _light_module()
+    light = _entity(module, {"16": f"FFFFFFFF{temperature:04X}", "3": 65535,
+                             "5": 120, "6": 1000})
+    assert light.color_mode == module.ColorMode.COLOR_TEMP
+    assert light.hs_color is None
+    assert light.color_temp_kelvin == int(
+        light.min_color_temp_kelvin
+        + temperature / 1000 * (light.max_color_temp_kelvin - light.min_color_temp_kelvin)
+    )
+
+
+def test_invalid_whole_strip_white_report_keeps_dpid_3():
+    module = _light_module()
+    light = _entity(module, {"16": "ffffffff03e9", "3": 0})
+    assert light.color_temp_kelvin == light.min_color_temp_kelvin
+
+
+def test_whole_strip_white_report_does_not_add_unsupported_color_mode():
+    module = _light_module()
+    light = _entity(module, {"16": "ffffffff03e8"}, ("1", "16"), pid="v3sjfa")
+    assert light.color_mode == module.ColorMode.HS
+    assert light.color_temp_kelvin is None
+
+
+def test_successful_white_write_supersedes_cached_packed_white():
+    module = _light_module()
+    light = _entity(module, {"16": "ffffffff01f4", "3": 65535})
+    asyncio.run(light.async_turn_on(color_temp_kelvin=light.max_color_temp_kelvin))
+    light.coordinator.device.async_set_state.assert_awaited_once_with(
+        {"1": 1, "2": 0, "3": 1000}
+    )
+    assert light.color_mode == module.ColorMode.COLOR_TEMP
+    assert light.color_temp_kelvin == light.max_color_temp_kelvin

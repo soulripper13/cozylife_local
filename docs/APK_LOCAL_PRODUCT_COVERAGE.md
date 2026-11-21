@@ -5,6 +5,13 @@ product inventory. A catalogue entry is eligible for local support only when
 the APK marks it as Wi-Fi (`net: "02"`) and there is evidence for the DPID
 meaning and a safe Home Assistant entity mapping.
 
+New discovery entries require the Wi-Fi marker. Existing entries retain the
+legacy classifier for compatibility with older or incomplete catalogue data.
+
+For the retained door-contact panel, DPID 7 reports open/closed and
+DPID 9 reports charge in tenths of a percent. These contact profiles
+expose a battery diagnostic when the device advertises DPID 9.
+
 ## Implemented local families
 
 | APK family | Local entity coverage | Evidence |

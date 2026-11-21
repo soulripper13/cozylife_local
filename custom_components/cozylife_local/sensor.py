@@ -1,4 +1,5 @@
 import logging
+from math import isfinite
 from typing import Optional
 
 from homeassistant.components.sensor import (
@@ -39,6 +40,8 @@ from .coordinator import CozyLifeCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+_CONTACT_BATTERY_PIDS = frozenset({"0iDvw9", "GnOqhr", "mBRflp", "o64g7o", "t7x7Uz"})
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -56,13 +59,19 @@ async def async_setup_entry(
     entities = [CozyLifeIPAddressSensor(coordinator)]
     dpids = set(coordinator.device.dpid)
 
-    if coordinator.classification.is_environment_sensor or coordinator.classification.is_multi_sensor:
+    is_environment_or_multi = (
+        coordinator.classification.is_environment_sensor
+        or coordinator.classification.is_multi_sensor
+    )
+    if is_environment_or_multi:
         entities.extend([
             CozyLifeTemperatureSensor(coordinator, config_entry),
             CozyLifeHumiditySensor(coordinator, config_entry),
         ])
-        if SENSOR_BATTERY in dpids:
-            entities.append(CozyLifeBatterySensor(coordinator, config_entry))
+    if SENSOR_BATTERY in dpids and (
+        is_environment_or_multi or coordinator.device.pid in _CONTACT_BATTERY_PIDS
+    ):
+        entities.append(CozyLifeBatterySensor(coordinator, config_entry))
 
     if coordinator.classification.supports_plug_metering:
         plug_sensor_descriptions = [
@@ -439,9 +448,16 @@ class CozyLifeBatterySensor(CozyLifeSensorBase):
 
     def _native_value_from_data(self) -> Optional[float]:
         raw = (self.coordinator.data or {}).get(SENSOR_BATTERY)
-        if raw is None:
+        if (
+            isinstance(raw, bool)
+            or not isinstance(raw, (int, float))
+            or not 0 <= raw <= 1000
+        ):
             return None
         return round(raw / 10, 1)
+
+    def _is_valid_native_value(self, value: float) -> bool:
+        return 0 <= value <= 100
 
 
 class CozyLifePlugSensor(CoordinatorEntity[CozyLifeCoordinator], SensorEntity):
@@ -470,10 +486,23 @@ class CozyLifePlugSensor(CoordinatorEntity[CozyLifeCoordinator], SensorEntity):
     @property
     def native_value(self) -> Optional[float]:
         raw = self.coordinator.data.get(self._description.dpid)
-        if raw is None:
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            return None
+
+        if self._description.dpid == "102" and not 0 <= raw <= 1000:
+            return None
+        if raw < 0 and self._description.dpid in (
+            PLUG_ADDED_ENERGY,
+            PLUG_ENERGY,
+            PLUG_CURRENT,
+            PLUG_POWER,
+            PLUG_VOLTAGE,
+        ):
             return None
 
         value = raw / self._description.scale + self._description.offset
+        if not isfinite(value):
+            return None
         if self._description.scale == 1:
             return float(value)
         return round(value, 3)

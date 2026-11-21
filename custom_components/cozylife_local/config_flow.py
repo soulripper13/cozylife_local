@@ -103,7 +103,7 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await async_load_model_catalog(self.hass)
             model = get_model_info(pid)
             device_type_code = discovery_info.get("device_type_code")
-            if model is not None:
+            if model is not None and model.network_type == "02":
                 classification = classify_device(
                     pid,
                     device_type_code or model.type_code,

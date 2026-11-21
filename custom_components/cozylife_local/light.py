@@ -63,6 +63,15 @@ def _kelvin_range_for_pid(pid: str | None) -> tuple[int, int]:
     )
 
 
+def _valid_color_component(value: Any, maximum: int) -> bool:
+    """Accept finite numeric reports within the component's wire range."""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and 0 <= value <= maximum
+    )
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -123,7 +132,8 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
             self._supported_color_modes.add(ColorMode.ONOFF)
             return
 
-        if (HUE in coordinator.device.dpid and SAT in coordinator.device.dpid
+        if (coordinator.device.pid == "v3sjfa"
+                or HUE in coordinator.device.dpid and SAT in coordinator.device.dpid
                 or _parse_color_hex(coordinator.data.get(COLOR_HEX)) is not None):
             self._supported_color_modes.add(ColorMode.HS)
         if TEMP in coordinator.device.dpid:
@@ -146,8 +156,12 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
     @property
     def is_on(self) -> Optional[bool]:
         """Return true if light is on."""
-        # Original integration checks if value > 0, since we send 255 when turning on
-        return self.coordinator.data.get(SWITCH, 0) > 0
+        value = self.coordinator.data.get(SWITCH, 0)
+        if value in ("0", "1"):
+            return value == "1"
+        if isinstance(value, (int, float)):
+            return value > 0
+        return None
 
     @property
     def brightness(self) -> Optional[int]:
@@ -156,23 +170,33 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
             return None
         # Device returns 0-1000, HA uses 0-255
         device_brightness = self.coordinator.data[BRIGHT]
+        if (
+            isinstance(device_brightness, bool)
+            or not isinstance(device_brightness, (int, float))
+            or not 0 <= device_brightness <= 1000
+        ):
+            return None
         return int((device_brightness / 1000) * 255)
 
     @property
     def color_mode(self) -> Optional[ColorMode]:
         """Return the color mode of the light."""
+        if self._dreamcolor_white_value() is not None:
+            return ColorMode.COLOR_TEMP
         if _parse_color_hex(self.coordinator.data.get(COLOR_HEX)) is not None:
             return ColorMode.HS
         # The original integration determines color mode based on which values are valid (< 60000)
         # not just based on work_mode. This is critical for proper UI updates.
 
         # Check if we have valid color values (< 60000)
-        if (HUE in self.coordinator.data and SAT in self.coordinator.data and
-            self.coordinator.data[HUE] < 60000):
+        if (
+            _valid_color_component(self.coordinator.data.get(HUE), 360)
+            and _valid_color_component(self.coordinator.data.get(SAT), 1000)
+        ):
             return ColorMode.HS
 
         # Check if we have valid color temp values (< 60000)
-        if TEMP in self.coordinator.data and self.coordinator.data[TEMP] < 60000:
+        if _valid_color_component(self.coordinator.data.get(TEMP), 1000):
             return ColorMode.COLOR_TEMP
 
         # Check if we have brightness control
@@ -196,6 +220,8 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
     @property
     def hs_color(self) -> Optional[tuple[float, float]]:
         """Return the hs color value."""
+        if self._dreamcolor_white_value() is not None:
+            return None
         parsed = _parse_color_hex(self.coordinator.data.get(COLOR_HEX))
         if parsed is not None:
             return float(parsed[0]), parsed[1] / 10
@@ -206,32 +232,39 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
 
         # Check if color value is valid (< 60000). Device sends 65535 when in white mode.
         # This matches the original integration's validation logic.
-        color_value = self.coordinator.data[HUE]
-        if color_value >= 60000:
-            _LOGGER.debug(f"[COZYLIFE] hs_color: Color value {color_value} >= 60000, ignoring (device in white mode)")
+        hue_value = self.coordinator.data[HUE]
+        saturation_value = self.coordinator.data[SAT]
+        if not (
+            _valid_color_component(hue_value, 360)
+            and _valid_color_component(saturation_value, 1000)
+        ):
             return None
 
         # Device sends Hue 0-360, Saturation 0-1000
         # Do RGB round-trip conversion for consistency (matches original integration)
-        hue = round(self.coordinator.data[HUE])
-        saturation = round(self.coordinator.data[SAT] / 10)
-        _LOGGER.debug(f"[COZYLIFE] hs_color: Device values - hue={hue}, sat={saturation}, raw_sat={self.coordinator.data[SAT]}")
+        hue = round(hue_value)
+        saturation = round(saturation_value / 10)
         r, g, b = color_hs_to_RGB(hue, saturation)
         hs_color = color_RGB_to_hs(r, g, b)
-        _LOGGER.debug(f"[COZYLIFE] hs_color: After RGB conversion - hs_color={hs_color}")
         return hs_color
+
+    def _dreamcolor_white_value(self) -> Optional[int]:
+        """Decode the white slider value in a whole-strip DPID 16 report."""
+        if ColorMode.COLOR_TEMP not in self._supported_color_modes:
+            return None
+        value = self.coordinator.data.get(COLOR_HEX)
+        if not isinstance(value, str) or re.fullmatch(r"ffffffff[0-9a-f]{4}", value, re.I) is None:
+            return None
+        temperature = int(value[8:], 16)
+        return temperature if temperature <= 1000 else None
 
     @property
     def color_temp_kelvin(self) -> Optional[int]:
         """Return the color temperature in Kelvin."""
-        if TEMP not in self.coordinator.data:
-            return None
-
-        # Check if color temp value is valid (< 60000). Device sends 65535 when in color mode.
-        # This matches the original integration's validation logic.
-        temp_value = self.coordinator.data[TEMP]
-        if temp_value >= 60000:
-            _LOGGER.debug(f"[COZYLIFE] color_temp_kelvin: Temp value {temp_value} >= 60000, ignoring (device in color mode)")
+        temp_value = self._dreamcolor_white_value()
+        if temp_value is None:
+            temp_value = self.coordinator.data.get(TEMP)
+        if not _valid_color_component(temp_value, 1000):
             return None
 
         # Convert device's 0-1000 scale to Kelvin
@@ -259,8 +292,21 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
             ha_brightness = kwargs[ATTR_BRIGHTNESS]
             # Convert HA's 0-255 to device's 0-1000 (use round like original)
             payload[BRIGHT] = round(ha_brightness / 255 * 1000)
+            if (
+                self.coordinator.device.pid == "kHap0G"
+                and ATTR_HS_COLOR not in kwargs
+                and ATTR_COLOR_TEMP_KELVIN not in kwargs
+            ):
+                # This model's panel pairs brightness with the current
+                # scene tab's mode. Preserve it when the device reports it.
+                mode = self.coordinator.data.get(WORK_MODE)
+                if mode in (6, 7, 8):
+                    payload[WORK_MODE] = mode
 
-        color_hex = _parse_color_hex(self.coordinator.data.get(COLOR_HEX)) is not None
+        color_hex = (
+            self.coordinator.device.pid == "v3sjfa"
+            or _parse_color_hex(self.coordinator.data.get(COLOR_HEX)) is not None
+        )
         if ATTR_HS_COLOR in kwargs and (
             color_hex or HUE in self.coordinator.device.dpid and SAT in self.coordinator.device.dpid
         ):
@@ -286,6 +332,15 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
             payload[TEMP] = round(max(0, min(1000, normalized_val * 1000)))
 
         if await self.coordinator.device.async_set_state(payload):
+            if (
+                TEMP in payload
+                and COLOR_HEX not in payload
+                and (
+                    self.coordinator.device.pid == "v3sjfa"
+                    or self._dreamcolor_white_value() is not None
+                )
+            ):
+                self.coordinator.data.pop(COLOR_HEX, None)
             self.coordinator.data.update(payload)
             self.async_write_ha_state()
 
@@ -299,5 +354,4 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
-        _LOGGER.debug(f"[COZYLIFE] Light entity {self.name} received coordinator update. Data: {self.coordinator.data}")
         self.async_write_ha_state()
