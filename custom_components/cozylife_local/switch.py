@@ -321,9 +321,11 @@ class CozyLifePlugBooleanSwitch(
     def is_on(self) -> bool | None:
         """Return whether overcurrent protection is enabled."""
         raw = self.coordinator.data.get(PLUG_OVERCURRENT_PROTECTION)
-        if raw is None:
-            return None
-        return bool(raw)
+        if raw in (0, "0"):
+            return False
+        if raw in (1, "1"):
+            return True
+        return None
 
     async def _async_set_state(self, enabled: bool) -> None:
         value = 1 if enabled else 0

@@ -10,6 +10,24 @@ from unittest.mock import AsyncMock
 from test_sensor_transport import COMPONENT_DIR
 
 
+def test_overcurrent_protection_decodes_the_documented_binary_values():
+    tree = ast.parse((COMPONENT_DIR / "switch.py").read_text())
+    entity = next(node for node in tree.body if isinstance(node, ast.ClassDef)
+                  and node.name == "CozyLifePlugBooleanSwitch")
+    getter = next(node for node in entity.body
+                  if isinstance(node, ast.FunctionDef) and node.name == "is_on")
+    getter.decorator_list = []
+    scope = {"PLUG_OVERCURRENT_PROTECTION": "32"}
+    exec(compile(ast.Module(body=[getter], type_ignores=[]), "switch.py", "exec"), scope)
+    state = {}
+    instance = SimpleNamespace(coordinator=SimpleNamespace(data=state))
+    for value, expected in ((0, False), ("0", False), (False, False),
+                            (1, True), ("1", True), (True, True),
+                            (None, None), (2, None), ("offline", None)):
+        state["32"] = value
+        assert scope["is_on"](instance) is expected
+
+
 def test_relay_bitmask_rejects_malformed_reports_and_preserves_other_gangs():
     tree = ast.parse((COMPONENT_DIR / "switch.py").read_text())
     relay = next(node for node in tree.body if isinstance(node, ast.ClassDef)
