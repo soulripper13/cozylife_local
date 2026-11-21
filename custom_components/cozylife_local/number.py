@@ -84,12 +84,12 @@ class CozyLifeCountdownNumberBase(
     @property
     def native_value(self) -> int | None:
         raw = self.coordinator.data.get(self._countdown_dpid)
-        if raw is None:
+        if raw is None or isinstance(raw, bool):
             return None
 
         try:
             value = int(raw)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return None
 
         return max(0, min(MAX_COUNTDOWN_SECONDS, value))
