@@ -124,8 +124,7 @@ class CozyLifePowerOnStateSelect(
             self.async_write_ha_state()
         else:
             _LOGGER.warning(
-                "Failed to set power-on state for CozyLife device %s",
-                self.coordinator.device.ip_address,
+                "Failed to set CozyLife power-on state",
             )
 
     @callback
@@ -175,8 +174,7 @@ class CozyLifeLedStatusSelect(
             self.async_write_ha_state()
         else:
             _LOGGER.warning(
-                "Failed to set LED status for CozyLife device %s",
-                self.coordinator.device.ip_address,
+                "Failed to set CozyLife LED status",
             )
 
     @callback

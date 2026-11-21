@@ -104,10 +104,8 @@ class CozyLifeCountdownNumberBase(
             self.async_write_ha_state()
         else:
             _LOGGER.warning(
-                "Failed to set %s countdown for CozyLife device %s to %s seconds",
+                "Failed to set CozyLife %s countdown",
                 self._device_kind,
-                self.coordinator.device.ip_address,
-                countdown,
             )
 
     async def _async_after_countdown_set(self, countdown: int) -> None:
