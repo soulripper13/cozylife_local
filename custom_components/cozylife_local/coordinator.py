@@ -82,6 +82,7 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def __init__(self, hass: HomeAssistant, device: CozyLifeDevice, entry: ConfigEntry):
         """Initialize coordinator."""
+        self.relay_write_lock = asyncio.Lock()
         self.classification = classify_device(
             device.pid,
             device.device_type_code,

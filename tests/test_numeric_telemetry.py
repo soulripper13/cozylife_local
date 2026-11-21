@@ -16,7 +16,7 @@ def test_relay_bitmask_rejects_malformed_reports_and_preserves_other_gangs():
                  and node.name == "CozyLifeSwitch")
     methods = [node for node in relay.body
                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-               and node.name in {"is_on", "_async_set_gang_state"}]
+               and node.name in {"is_on", "_async_set_gang_state", "_async_write_gang_mask"}]
     for method in methods:
         method.decorator_list = []
     scope = {"BITMASK_DPID": "1"}
@@ -27,6 +27,8 @@ def test_relay_bitmask_rejects_malformed_reports_and_preserves_other_gangs():
         coordinator=SimpleNamespace(data=state, device=SimpleNamespace(async_set_state=sender)),
         _gang_bit=0, async_write_ha_state=lambda: None,
     )
+    instance.coordinator.relay_write_lock = asyncio.Lock()
+    instance._async_write_gang_mask = lambda enabled: scope["_async_write_gang_mask"](instance, enabled)
     assert scope["is_on"](instance) is None
     for raw in (None, "offline", -1, {}, 1.5):
         state["1"] = raw
@@ -38,6 +40,26 @@ def test_relay_bitmask_rejects_malformed_reports_and_preserves_other_gangs():
     asyncio.run(scope["_async_set_gang_state"](instance, True))
     sender.assert_awaited_once_with({"1": 3})
     assert scope["is_on"](instance) is True
+
+    async def simultaneous():
+        state["1"] = 0
+        writes = []
+
+        async def send(payload):
+            writes.append(payload["1"])
+            await asyncio.sleep(0)
+            return True
+
+        instance.coordinator.device.async_set_state = send
+        second = SimpleNamespace(coordinator=instance.coordinator, _gang_bit=1,
+                                 async_write_ha_state=lambda: None)
+        second._async_write_gang_mask = lambda enabled: scope["_async_write_gang_mask"](second, enabled)
+        await asyncio.gather(scope["_async_set_gang_state"](instance, True),
+                             scope["_async_set_gang_state"](second, True))
+        assert writes == [1, 3]
+        assert state["1"] == 3
+
+    asyncio.run(simultaneous())
 
 
 def test_battery_measurements_and_restored_values_stay_in_percentage_range():
