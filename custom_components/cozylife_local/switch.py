@@ -163,10 +163,12 @@ class CozyLifeSwitch(CoordinatorEntity[CozyLifeCoordinator], SwitchEntity):
         )
 
     @property
-    def is_on(self) -> bool:
+    def is_on(self) -> bool | None:
         """Return true if this switch gang's bit is set in the bitmask."""
         # Get the integer value of the bitmask from the coordinator's data.
-        bitmask_state = self.coordinator.data.get(BITMASK_DPID, 0)
+        bitmask_state = self.coordinator.data.get(BITMASK_DPID)
+        if not isinstance(bitmask_state, int) or bitmask_state < 0:
+            return None
         
         # Check if the bit for this gang is set.
         return (bitmask_state & (1 << self._gang_bit)) != 0
@@ -174,6 +176,9 @@ class CozyLifeSwitch(CoordinatorEntity[CozyLifeCoordinator], SwitchEntity):
     async def _async_set_gang_state(self, new_gang_state: bool) -> None:
         """Calculate and send the new bitmask state, then optimistically update."""
         current_bitmask = self.coordinator.data.get(BITMASK_DPID, 0)
+        if not isinstance(current_bitmask, int) or current_bitmask < 0:
+            # A replacement bitmask must not clear other gangs based on invalid state.
+            return
         
         if new_gang_state:
             # To turn on, perform a bitwise OR.

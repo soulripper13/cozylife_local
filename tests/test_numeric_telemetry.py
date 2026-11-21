@@ -1,11 +1,43 @@
 """Numeric telemetry must not report invalid payloads as measurements."""
 
 import ast
+import asyncio
 from types import SimpleNamespace
 from math import isfinite
 from typing import Optional
+from unittest.mock import AsyncMock
 
 from test_sensor_transport import COMPONENT_DIR
+
+
+def test_relay_bitmask_rejects_malformed_reports_and_preserves_other_gangs():
+    tree = ast.parse((COMPONENT_DIR / "switch.py").read_text())
+    relay = next(node for node in tree.body if isinstance(node, ast.ClassDef)
+                 and node.name == "CozyLifeSwitch")
+    methods = [node for node in relay.body
+               if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+               and node.name in {"is_on", "_async_set_gang_state"}]
+    for method in methods:
+        method.decorator_list = []
+    scope = {"BITMASK_DPID": "1"}
+    exec(compile(ast.Module(body=methods, type_ignores=[]), "switch.py", "exec"), scope)
+    sender = AsyncMock(return_value=True)
+    state = {}
+    instance = SimpleNamespace(
+        coordinator=SimpleNamespace(data=state, device=SimpleNamespace(async_set_state=sender)),
+        _gang_bit=0, async_write_ha_state=lambda: None,
+    )
+    assert scope["is_on"](instance) is None
+    for raw in (None, "offline", -1, {}, 1.5):
+        state["1"] = raw
+        assert scope["is_on"](instance) is None
+        asyncio.run(scope["_async_set_gang_state"](instance, True))
+    sender.assert_not_awaited()
+    state["1"] = 2
+    assert scope["is_on"](instance) is False
+    asyncio.run(scope["_async_set_gang_state"](instance, True))
+    sender.assert_awaited_once_with({"1": 3})
+    assert scope["is_on"](instance) is True
 
 
 def test_battery_measurements_and_restored_values_stay_in_percentage_range():
