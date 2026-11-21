@@ -118,9 +118,14 @@ class CozyLifeSpeaker(
         """Return the current source advertised by DPID 6."""
         raw = self.coordinator.data.get("6")
         try:
-            return _SOURCES[int(raw)]
-        except (TypeError, ValueError, IndexError):
+            index = int(raw)
+        except (TypeError, ValueError, OverflowError):
             return None
+        if isinstance(raw, bool) or not 0 <= index < len(_SOURCES):
+            return None
+        if isinstance(raw, float) and raw != index:
+            return None
+        return _SOURCES[index]
 
     async def _async_set(self, payload: dict[str, Any]) -> None:
         """Write one verified state change and update the displayed state."""

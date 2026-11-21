@@ -8,6 +8,28 @@ from typing import Optional
 from test_sensor_transport import COMPONENT_DIR
 
 
+def test_speaker_source_only_accepts_the_panel_enum():
+    tree = ast.parse((COMPONENT_DIR / "media_player.py").read_text())
+    sources = next(node for node in tree.body if isinstance(node, ast.Assign)
+                   and any(isinstance(target, ast.Name) and target.id == "_SOURCES"
+                           for target in node.targets))
+    getter = next(node for entity in tree.body if isinstance(entity, ast.ClassDef)
+                  for node in entity.body
+                  if isinstance(node, ast.FunctionDef) and node.name == "source")
+    getter.decorator_list = []
+    scope = {}
+    exec(compile(ast.Module(body=[sources, getter], type_ignores=[]),
+                 "media_player.py", "exec"), scope)
+    state = {}
+    speaker = SimpleNamespace(coordinator=SimpleNamespace(data=state))
+    for invalid in (None, -1, "-2", 3, True, 1.5, float("inf"), float("nan")):
+        state["6"] = invalid
+        assert scope["source"](speaker) is None
+    for value, expected in ((0, "Bluetooth"), ("1", "Local playback"), (2, "Line-in")):
+        state["6"] = value
+        assert scope["source"](speaker) == expected
+
+
 def test_native_value_handles_missing_malformed_and_valid_telemetry():
     tree = ast.parse((COMPONENT_DIR / "sensor.py").read_text())
     entity = next(node for node in tree.body
