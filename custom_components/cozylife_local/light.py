@@ -157,6 +157,12 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
             return None
         # Device returns 0-1000, HA uses 0-255
         device_brightness = self.coordinator.data[BRIGHT]
+        if (
+            isinstance(device_brightness, bool)
+            or not isinstance(device_brightness, (int, float))
+            or not 0 <= device_brightness <= 1000
+        ):
+            return None
         return int((device_brightness / 1000) * 255)
 
     @property

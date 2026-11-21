@@ -127,3 +127,13 @@ def test_verified_strip_uses_dpid16_before_first_report():
     light.coordinator.device.async_set_state.assert_awaited_once_with(
         {"1": 1, "2": 0, "16": "007803e8ffff"}
     )
+
+
+def test_brightness_reports_respect_the_wire_scale():
+    light = _entity(_light_module(), {})
+    for invalid in (True, "offline", -1, 1001, float("inf"), float("nan")):
+        light.coordinator.data["4"] = invalid
+        assert light.brightness is None
+    for raw, expected in ((0, 0), (500, 127), (1000, 255)):
+        light.coordinator.data["4"] = raw
+        assert light.brightness == expected
