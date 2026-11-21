@@ -12,6 +12,36 @@ import pytest
 from test_sensor_transport import COMPONENT_DIR, _load_api, _load_coordinator
 
 
+def test_silent_powered_writes_expire_and_real_state_restores_health():
+    from unittest.mock import AsyncMock
+
+    Coordinator = _load_coordinator()
+
+    async def exercise():
+        coordinator = object.__new__(Coordinator)
+        coordinator._uses_sensor_polling = False
+        coordinator.device = types.SimpleNamespace(
+            pid="v3sjfa", async_request_properties=AsyncMock(return_value=True)
+        )
+        coordinator.data = {"16": "007803e8ffff"}
+        coordinator.async_set_updated_data = lambda data: setattr(coordinator, "data", data)
+        clock = types.SimpleNamespace(monotonic=lambda: 100.0)
+        with patch("cozylife_local.coordinator.time", clock):
+            await coordinator._async_get_local_state()
+            clock.monotonic = lambda: 161.0
+            for _ in range(2):
+                with pytest.raises(RuntimeError, match="No recent CozyLife device state"):
+                    await coordinator._async_get_local_state()
+            await coordinator._async_handle_device_message({"msg": {"data": {"3": 500}}})
+            assert await coordinator._async_get_local_state() == {"3": 500}
+            await coordinator._async_handle_device_message(
+                {"msg": {"data": {"16": "007803e8ffff"}}}
+            )
+            assert coordinator.data["16"] == "007803e8ffff"
+
+    asyncio.run(exercise())
+
+
 def test_initial_network_failure_requests_setup_retry():
     """Incomplete cached entries must not become permanent setup failures."""
     from unittest.mock import AsyncMock, Mock

@@ -5,6 +5,12 @@ product inventory. A catalogue entry is eligible for local support only when
 the APK marks it as Wi-Fi (`net: "02"`) and there is evidence for the DPID
 meaning and a safe Home Assistant entity mapping.
 
+New discovery entries require the Wi-Fi marker. Existing entries retain the
+legacy classifier for compatibility with older or incomplete catalogue data.
+
+New discovery entries require the Wi-Fi marker. Existing entries retain the
+legacy classifier for compatibility with older or incomplete catalogue data.
+
 ## Implemented local families
 
 | APK family | Local entity coverage | Evidence |

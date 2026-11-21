@@ -60,6 +60,11 @@ regression introduced by retained connections.
 
 ## Regression evidence and limits
 
+Powered devices also need recent state evidence for Home Assistant
+availability. After an initial grace period of two health intervals (60
+seconds), successful writes alone do not preserve availability. A nonempty,
+successful state report restores availability through the existing listener.
+
 `tests/test_network_recovery.py` uses local TCP peers that keep the old session
 open and accept writes while withholding usable state. Before the repair, the
 next properties query continues using that session; after the repair it opens a

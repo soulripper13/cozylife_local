@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from datetime import timedelta
 from typing import Any
 
@@ -336,6 +337,10 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         received_state = {str(dpid): value for dpid, value in state_data.items()}
+        if not received_state:
+            return
+        if not self._uses_sensor_polling:
+            self._powered_state_evidence_at = time.monotonic()
         if self._uses_sensor_polling:
             from .measurement_filter import MeasurementFilter
 
@@ -379,6 +384,13 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Device state reports can be partial.  The APK delivers them to the
         # device listener as updates, rather than discarding the prior state.
         state_data = {**(self.data or {}), **received_state}
+        if (
+            getattr(getattr(self, "device", None), "pid", None) == "v3sjfa"
+            and "16" not in received_state
+            and type(received_state.get("3")) in (int, float)
+            and 0 <= received_state["3"] <= 1000
+        ):
+            state_data.pop("16", None)
         if self._uses_sensor_polling:
             state_data = self._preserve_environment_measurements(state_data)
 
@@ -520,10 +532,16 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # A failed local request makes the entity unavailable. Waiting for a
         # state frame was introduced in 1.1.3 and can hold the shared writer
         # lock long enough to delay a user control command.
+        if not hasattr(self, "_powered_state_evidence_at"):
+            self._powered_state_evidence_at = time.monotonic()
         if not await self.device.async_request_properties(
             timeout=POWERED_DEVICE_AVAILABILITY_TIMEOUT_SECONDS
         ):
             raise UpdateFailed("Failed to request state from CozyLife device")
+        if time.monotonic() - self._powered_state_evidence_at >= (
+            POWERED_DEVICE_AVAILABILITY_INTERVAL.total_seconds() * 2
+        ):
+            raise UpdateFailed("No recent CozyLife device state")
         return dict(self.data or {})
 
     async def _async_update_data(self) -> dict[str, Any]:

@@ -123,7 +123,8 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
             self._supported_color_modes.add(ColorMode.ONOFF)
             return
 
-        if (HUE in coordinator.device.dpid and SAT in coordinator.device.dpid
+        if (coordinator.device.pid == "v3sjfa"
+                or HUE in coordinator.device.dpid and SAT in coordinator.device.dpid
                 or _parse_color_hex(coordinator.data.get(COLOR_HEX)) is not None):
             self._supported_color_modes.add(ColorMode.HS)
         if TEMP in coordinator.device.dpid:
@@ -208,17 +209,14 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
         # This matches the original integration's validation logic.
         color_value = self.coordinator.data[HUE]
         if color_value >= 60000:
-            _LOGGER.debug(f"[COZYLIFE] hs_color: Color value {color_value} >= 60000, ignoring (device in white mode)")
             return None
 
         # Device sends Hue 0-360, Saturation 0-1000
         # Do RGB round-trip conversion for consistency (matches original integration)
         hue = round(self.coordinator.data[HUE])
         saturation = round(self.coordinator.data[SAT] / 10)
-        _LOGGER.debug(f"[COZYLIFE] hs_color: Device values - hue={hue}, sat={saturation}, raw_sat={self.coordinator.data[SAT]}")
         r, g, b = color_hs_to_RGB(hue, saturation)
         hs_color = color_RGB_to_hs(r, g, b)
-        _LOGGER.debug(f"[COZYLIFE] hs_color: After RGB conversion - hs_color={hs_color}")
         return hs_color
 
     @property
@@ -231,7 +229,6 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
         # This matches the original integration's validation logic.
         temp_value = self.coordinator.data[TEMP]
         if temp_value >= 60000:
-            _LOGGER.debug(f"[COZYLIFE] color_temp_kelvin: Temp value {temp_value} >= 60000, ignoring (device in color mode)")
             return None
 
         # Convert device's 0-1000 scale to Kelvin
@@ -260,7 +257,10 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
             # Convert HA's 0-255 to device's 0-1000 (use round like original)
             payload[BRIGHT] = round(ha_brightness / 255 * 1000)
 
-        color_hex = _parse_color_hex(self.coordinator.data.get(COLOR_HEX)) is not None
+        color_hex = (
+            self.coordinator.device.pid == "v3sjfa"
+            or _parse_color_hex(self.coordinator.data.get(COLOR_HEX)) is not None
+        )
         if ATTR_HS_COLOR in kwargs and (
             color_hex or HUE in self.coordinator.device.dpid and SAT in self.coordinator.device.dpid
         ):
@@ -286,6 +286,8 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
             payload[TEMP] = round(max(0, min(1000, normalized_val * 1000)))
 
         if await self.coordinator.device.async_set_state(payload):
+            if self.coordinator.device.pid == "v3sjfa" and TEMP in payload and COLOR_HEX not in payload:
+                self.coordinator.data.pop(COLOR_HEX, None)
             self.coordinator.data.update(payload)
             self.async_write_ha_state()
 
@@ -299,5 +301,4 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
-        _LOGGER.debug(f"[COZYLIFE] Light entity {self.name} received coordinator update. Data: {self.coordinator.data}")
         self.async_write_ha_state()

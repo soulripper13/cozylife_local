@@ -53,8 +53,8 @@ def _light_module():
     return types.SimpleNamespace(**namespace)
 
 
-def _entity(module, state, dpids=("1", "2", "3", "4", "5", "6", "16")):
-    device = types.SimpleNamespace(pid="v3sjfa", dpid=list(dpids), device_id="test",
+def _entity(module, state, dpids=("1", "2", "3", "4", "5", "6", "16"), *, pid="legacy"):
+    device = types.SimpleNamespace(pid=pid, dpid=list(dpids), device_id="test",
                                    async_set_state=AsyncMock(return_value=True))
     coordinator = types.SimpleNamespace(device=device, data=dict(state))
     return module.CozyLifeLight(coordinator, types.SimpleNamespace(data={}, options={}))
@@ -119,3 +119,11 @@ def test_temperature_brightness_onoff_and_failed_writes_are_preserved():
     before = dict(dream.coordinator.data)
     asyncio.run(dream.async_turn_on(hs_color=(120, 100)))
     assert dream.coordinator.data == before
+
+
+def test_verified_strip_uses_dpid16_before_first_report():
+    light = _entity(_light_module(), {}, pid="v3sjfa")
+    asyncio.run(light.async_turn_on(hs_color=(120, 100)))
+    light.coordinator.device.async_set_state.assert_awaited_once_with(
+        {"1": 1, "2": 0, "16": "007803e8ffff"}
+    )

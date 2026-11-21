@@ -652,6 +652,7 @@ def test_confirming_udp_catalogued_plug_needs_no_tcp_inventory() -> None:
         model = types.SimpleNamespace(
             model_name="Smart Plug",
             type_code="01",
+            network_type="02",
             dpids=frozenset({"1", "11", "18", "19", "20"}),
         )
         classification = types.SimpleNamespace(
