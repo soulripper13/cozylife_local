@@ -178,8 +178,13 @@ class CozyLifeBinarySensor(CoordinatorEntity[CozyLifeCoordinator], BinarySensorE
         raw = self.coordinator.data.get(self._description.dpid)
         if raw is None:
             return None
-        if self._description.key == "call_active":
-            return raw in (1, "1", True)
+        if self._description.dpid in {"101", "103", "106"}:
+            # Video event reports use 1 for active and 2 for clear.
+            if raw in (1, "1"):
+                return True
+            if raw in (2, "2", 0, "0"):
+                return False
+            return None
         return _coerce_binary_state(raw)
 
     @callback

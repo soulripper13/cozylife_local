@@ -10,6 +10,24 @@ from unittest.mock import AsyncMock
 from test_sensor_transport import COMPONENT_DIR
 
 
+def test_video_event_clear_is_not_an_active_alarm():
+    tree = ast.parse((COMPONENT_DIR / "binary_sensor.py").read_text())
+    getter = next(node for entity in tree.body if isinstance(entity, ast.ClassDef)
+                  for node in entity.body
+                  if isinstance(node, ast.FunctionDef) and node.name == "is_on")
+    getter.decorator_list = []
+    scope = {}
+    exec(compile(ast.Module(body=[getter], type_ignores=[]), "binary_sensor.py", "exec"), scope)
+    data = {}
+    instance = SimpleNamespace(coordinator=SimpleNamespace(data=data))
+    for dpid in ("101", "103", "106"):
+        instance._description = SimpleNamespace(dpid=dpid)
+        for raw, expected in ((1, True), ("1", True), (2, False), ("2", False),
+                              (0, False), (None, None), ("offline", None)):
+            data[dpid] = raw
+            assert scope["is_on"](instance) is expected
+
+
 def test_overcurrent_protection_decodes_the_documented_binary_values():
     tree = ast.parse((COMPONENT_DIR / "switch.py").read_text())
     entity = next(node for node in tree.body if isinstance(node, ast.ClassDef)
