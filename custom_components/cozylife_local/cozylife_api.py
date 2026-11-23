@@ -46,6 +46,7 @@ class CozyLifeDevice:
         self._state_waiters: list[asyncio.Future[Dict[str, Any]]] = []
         self._message_listener: Optional[Callable[[Dict[str, Any]], Any]] = None
         self._reader_task: Optional[asyncio.Task[None]] = None
+        self._connection_generation = 0
         self._connection_lock: Optional[asyncio.Lock] = None
         self._status_lock: Optional[asyncio.Lock] = None
         self._last_transport_error: Optional[str] = None
@@ -177,7 +178,10 @@ class CozyLifeDevice:
         if self._connection_lock is None:
             self._connection_lock = asyncio.Lock()
 
+        generation = self._connection_generation
         async with self._connection_lock:
+            if generation != self._connection_generation:
+                return
             if self._writer and not self._writer.is_closing():
                 return
             try:
@@ -191,6 +195,10 @@ class CozyLifeDevice:
                 _RAW_LOGGER.debug("Could not open CozyLife socket: %s", type(err).__name__)
                 self._disconnect()
                 raise
+
+            if generation != self._connection_generation:
+                writer.close()
+                return
 
             self._reader = reader
             if self._tcp_user_timeout_ms is not None:
@@ -236,6 +244,7 @@ class CozyLifeDevice:
 
     async def async_close(self) -> None:
         """Release the persistent TCP reader when its config entry unloads."""
+        self._connection_generation += 1
         reader_task = self._reader_task
         self._reader_task = None
         self._disconnect()

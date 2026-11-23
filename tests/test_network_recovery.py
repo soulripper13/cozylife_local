@@ -531,3 +531,32 @@ def test_address_change_retires_a_socket_opened_during_discovery():
             await server.wait_closed()
 
     asyncio.run(exercise())
+
+
+def test_close_does_not_allow_an_inflight_dial_to_restore_the_socket():
+    """The entry may unload while its TCP connection is still opening."""
+    Device = _load_api()
+
+    async def exercise():
+        dial_started = asyncio.Event()
+        finish_dial = asyncio.Event()
+        writer = types.SimpleNamespace(closed=False)
+        writer.close = lambda: setattr(writer, "closed", True)
+
+        async def connect(*_args):
+            dial_started.set()
+            await finish_dial.wait()
+            return object(), writer
+
+        device = Device("192.0.2.10")
+        with patch("asyncio.open_connection", connect):
+            opening = asyncio.create_task(device._connect())
+            await asyncio.wait_for(dial_started.wait(), 1)
+            await device.async_close()
+            finish_dial.set()
+            await opening
+            assert writer.closed
+            assert device._writer is None
+            assert device._reader_task is None
+
+    asyncio.run(exercise())
