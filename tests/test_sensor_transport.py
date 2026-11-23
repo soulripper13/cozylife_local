@@ -489,7 +489,6 @@ def _load_config_flow():
     config_entries.ConfigEntry = object
     config_entries.ConfigFlow = ConfigFlow
     config_entries.OptionsFlow = object
-    config_entries.CONN_CLASS_LOCAL_POLL = "local_poll"
     sys.modules["homeassistant.config_entries"] = config_entries
     data_entry_flow = types.ModuleType("homeassistant.data_entry_flow")
     data_entry_flow.FlowResult = dict
