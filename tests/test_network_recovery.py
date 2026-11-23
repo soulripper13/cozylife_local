@@ -412,3 +412,68 @@ def test_separate_white_reports_supersede_cached_packed_white():
         assert coordinator.data == {"3": 100, "16": "ffffffff0200"}
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    ("delay", "should_connect"),
+    [(1.3, True), (3.3, False)],
+)
+def test_powered_refresh_connect_budget(delay, should_connect):
+    Device = _load_api()
+    Coordinator = _load_coordinator()
+
+    async def exercise():
+        commands = asyncio.Queue()
+        reports = asyncio.Queue()
+        release_reply = asyncio.Event()
+        peer_done = asyncio.Event()
+        open_connection = asyncio.open_connection
+
+        async def connect(*args, **kwargs):
+            await asyncio.sleep(delay)
+            return await open_connection(*args, **kwargs)
+
+        async def peer(reader, writer):
+            try:
+                await commands.put(json.loads(await reader.readline()))
+                await release_reply.wait()
+                writer.write(b'{"cmd":2,"res":0,"msg":{"data":{"1":1}}}\r\n')
+                await writer.drain()
+            finally:
+                writer.close()
+                await writer.wait_closed()
+                peer_done.set()
+
+        listener = await asyncio.start_server(peer, "127.0.0.1", 0)
+        device = Device("127.0.0.1")
+        device.set_message_listener(reports.put_nowait)
+        coordinator = object.__new__(Coordinator)
+        coordinator.device = device
+        coordinator._uses_sensor_polling = False
+        coordinator.data = {"1": 0}
+        try:
+            with patch("cozylife_local.cozylife_api.COZYLIFE_PORT",
+                       listener.sockets[0].getsockname()[1]), patch(
+                           "asyncio.open_connection", connect
+                       ):
+                if should_connect:
+                    assert await coordinator._async_get_local_state() == {"1": 0}
+                    frame = await asyncio.wait_for(commands.get(), 1)
+                    assert frame["cmd"] == 2
+                    assert frame["msg"] == {"attr": [0]}
+                    assert reports.empty()
+                    release_reply.set()
+                    report = await asyncio.wait_for(reports.get(), 1)
+                    assert report["msg"]["data"] == {"1": 1}
+                    await asyncio.wait_for(peer_done.wait(), 1)
+                else:
+                    with pytest.raises(RuntimeError, match="^Failed to request state from CozyLife device$"):
+                        await coordinator._async_get_local_state()
+                    assert commands.empty()
+        finally:
+            release_reply.set()
+            await device.async_close()
+            listener.close()
+            await listener.wait_closed()
+
+    asyncio.run(exercise())

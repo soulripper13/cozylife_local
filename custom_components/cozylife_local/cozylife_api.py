@@ -462,6 +462,7 @@ class CozyLifeDevice:
         The CozyLife Wi-Fi client sends ``attr:[0]`` and routes the next local
         state frame through the device listener. The local write is the request
         completion; a later frame updates the coordinator independently.
+        The optional timeout bounds draining the write, not opening the socket.
         """
         if self._status_lock is None:
             self._status_lock = asyncio.Lock()
@@ -469,7 +470,7 @@ class CozyLifeDevice:
         async with self._status_lock:
             return (
                 await self._async_request_state(
-                    [0], wait_for_state=False, transport_timeout=timeout,
+                    [0], wait_for_state=False, write_timeout=timeout,
                     track_properties_response=True,
                 )
                 is not None
@@ -506,15 +507,15 @@ class CozyLifeDevice:
         attributes: list[int],
         *,
         wait_for_state: bool,
-        transport_timeout: float | None = None,
+        write_timeout: float | None = None,
         track_properties_response: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Use the APK write-and-listen state path over one durable socket."""
         state_waiter = None
         writer = None
         try:
-            timeout = self._timeout if transport_timeout is None else transport_timeout
-            await self._connect(timeout=timeout)
+            await self._connect()
+            drain_timeout = self._timeout if write_timeout is None else write_timeout
             writer = self._writer
             if writer is None:
                 return None
@@ -532,14 +533,14 @@ class CozyLifeDevice:
                 # during that await. Repeated discovery must not extend this.
                 self._properties_requested_at = time.monotonic()
             writer.write(encoded_message)
-            await asyncio.wait_for(writer.drain(), timeout=timeout)
+            await asyncio.wait_for(writer.drain(), timeout=drain_timeout)
 
             if state_waiter is None:
                 return {}
 
             try:
                 state_data = await asyncio.wait_for(
-                    asyncio.shield(state_waiter), timeout=timeout
+                    asyncio.shield(state_waiter), timeout=self._timeout
                 )
                 return state_data or None
             except asyncio.TimeoutError:
