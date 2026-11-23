@@ -2235,8 +2235,8 @@ def test_powered_refresh_marks_unavailable_only_when_its_local_request_fails() -
     asyncio.run(exercise())
 
 
-def test_powered_udp_announcement_queues_one_gated_refresh() -> None:
-    """A powered device refreshes only after a matching UDP announcement."""
+def test_powered_udp_announcement_refreshes_only_after_address_change() -> None:
+    """Only a changed address triggers a powered refresh from UDP."""
     CozyLifeCoordinator = _load_coordinator()
 
     async def exercise() -> None:
@@ -2255,8 +2255,13 @@ def test_powered_udp_announcement_queues_one_gated_refresh() -> None:
         coordinator._uses_sensor_polling = False
         coordinator.device = types.SimpleNamespace()
 
+        current_address = "10.0.0.44"
+
         async def update_ip_address(ip_address: str) -> bool:
-            return ip_address == "10.0.0.45"
+            nonlocal current_address
+            moved = ip_address != current_address
+            current_address = ip_address
+            return moved
 
         async def refresh() -> None:
             refreshes.append(True)
@@ -2264,10 +2269,14 @@ def test_powered_udp_announcement_queues_one_gated_refresh() -> None:
         coordinator.device.async_update_ip_address = update_ip_address
         coordinator.async_request_refresh = refresh
 
-        await coordinator.async_handle_discovered_address("10.0.0.44")
+        for _ in range(3):
+            await coordinator.async_handle_discovered_address("10.0.0.44")
+        assert refreshes == []
+        assert updates == []
+        await coordinator.async_handle_discovered_address("10.0.0.45")
         await coordinator.async_handle_discovered_address("10.0.0.45")
 
-        assert refreshes == [True, True]
+        assert refreshes == [True]
         assert updates == [{"ip_address": "10.0.0.45"}]
 
     asyncio.run(exercise())
