@@ -116,10 +116,13 @@ class CozyLifeDevice:
 
     async def async_update_ip_address(self, ip_address: str) -> bool:
         """Replace a discovered address and discard only the old TCP socket."""
-        if ip_address == self._ip_address:
-            return False
-        await self.async_close()
-        self._ip_address = ip_address
+        if self._connection_lock is None:
+            self._connection_lock = asyncio.Lock()
+        async with self._connection_lock:
+            if ip_address == self._ip_address:
+                return False
+            await self.async_close()
+            self._ip_address = ip_address
         _LOGGER.info("CozyLife device address refreshed")
         return True
 

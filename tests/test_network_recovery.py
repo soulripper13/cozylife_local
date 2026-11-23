@@ -477,3 +477,57 @@ def test_powered_refresh_connect_budget(delay, should_connect):
             await listener.wait_closed()
 
     asyncio.run(exercise())
+
+
+def test_address_change_retires_a_socket_opened_during_discovery():
+    """A completed dial to the old address must not survive an address change."""
+    Device = _load_api()
+
+    async def exercise():
+        dial_started = asyncio.Event()
+        finish_dial = asyncio.Event()
+        dial_addresses = []
+        writers = []
+        open_connection = asyncio.open_connection
+
+        async def connect(address, port):
+            dial_addresses.append(address)
+            if len(dial_addresses) == 1:
+                dial_started.set()
+                await finish_dial.wait()
+            reader, writer = await open_connection("127.0.0.1", port)
+            writers.append(writer)
+            return reader, writer
+
+        async def peer(reader, writer):
+            try:
+                await reader.read()
+            finally:
+                writer.close()
+                await writer.wait_closed()
+
+        server = await asyncio.start_server(peer, "127.0.0.1", 0)
+        device = Device("192.0.2.10")
+        try:
+            with (
+                patch("asyncio.open_connection", connect),
+                patch("cozylife_local.cozylife_api.COZYLIFE_PORT",
+                      server.sockets[0].getsockname()[1]),
+            ):
+                opening = asyncio.create_task(device._connect())
+                await asyncio.wait_for(dial_started.wait(), 1)
+                moving = asyncio.create_task(device.async_update_ip_address("192.0.2.11"))
+                await asyncio.sleep(0)
+                finish_dial.set()
+                await opening
+                assert await moving
+                await device._connect()
+                assert dial_addresses == ["192.0.2.10", "192.0.2.11"]
+                assert writers[0].is_closing()
+                assert device.is_connected
+        finally:
+            await device.async_close()
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(exercise())
