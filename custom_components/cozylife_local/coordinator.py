@@ -40,9 +40,8 @@ SENSOR_CONNECT_TIMEOUT_SECONDS = 0.2
 # by CozyLifeDevice, so this never overlaps another status write.
 SENSOR_STATUS_ATTEMPT_INTERVAL_SECONDS = 0.25
 POWERED_DEVICE_AVAILABILITY_INTERVAL = timedelta(seconds=30)
-# The APK uses a one-second TCP connection allowance. Apply that bound only
-# to background health work; interactive commands keep the device's normal
-# timeout and are never intentionally slowed by availability polling.
+# Bound the background write drain separately from the device's normal
+# TCP connect timeout.
 POWERED_DEVICE_AVAILABILITY_TIMEOUT_SECONDS = 1.0
 ENVIRONMENT_SENSOR_MEASUREMENTS = {
     SENSOR_TEMPERATURE: "temperature",
@@ -120,6 +119,7 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._sensor_status_task: asyncio.Task[None] | None = None
         self._identity_refresh_task: asyncio.Task[None] | None = None
         self._powered_followup_task: asyncio.Task[None] | None = None
+        self._next_powered_udp_retry_at = 0.0
         self._closed = False
         if self._uses_sensor_polling:
             # A sleeping device must not let one unsuccessful local connection
@@ -192,9 +192,16 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # task remains responsible for retrying between announcements.
             await self.device.async_send_status()
             return
-        # Powered devices already have a periodic TCP availability refresh.
-        # Request an immediate refresh only when discovery changes the endpoint.
-        if moved:
+        # A fresh announcement can signal recovery even at the same address.
+        # Leave healthy devices on periodic polling and throttle UDP retries
+        # per entry, including announcements received during an in-flight retry.
+        now = time.monotonic()
+        if moved or (
+            not self.last_update_success and now >= self._next_powered_udp_retry_at
+        ):
+            self._next_powered_udp_retry_at = (
+                now + POWERED_DEVICE_AVAILABILITY_INTERVAL.total_seconds()
+            )
             await self.async_request_refresh()
 
     @callback
@@ -555,8 +562,11 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             timeout=POWERED_DEVICE_AVAILABILITY_TIMEOUT_SECONDS
         ):
             raise UpdateFailed("Failed to request state from CozyLife device")
-        if time.monotonic() - self._powered_state_evidence_at >= (
-            POWERED_DEVICE_AVAILABILITY_INTERVAL.total_seconds() * 2
+        # A write alone cannot recover an unavailable device. The reader
+        # can restore availability as soon as it receives actual state.
+        if not getattr(self, "last_update_success", True) or (
+            time.monotonic() - self._powered_state_evidence_at
+            >= POWERED_DEVICE_AVAILABILITY_INTERVAL.total_seconds() * 2
         ):
             raise UpdateFailed("No recent CozyLife device state")
         return dict(self.data or {})

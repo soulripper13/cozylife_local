@@ -2235,8 +2235,8 @@ def test_powered_refresh_marks_unavailable_only_when_its_local_request_fails() -
     asyncio.run(exercise())
 
 
-def test_powered_udp_announcement_refreshes_only_after_address_change() -> None:
-    """Only a changed address triggers a powered refresh from UDP."""
+def test_powered_udp_announcement_retries_unavailable_devices_with_rate_limit() -> None:
+    """Retry same-address discovery only when unavailable and outside the cooldown."""
     CozyLifeCoordinator = _load_coordinator()
 
     async def exercise() -> None:
@@ -2254,6 +2254,8 @@ def test_powered_udp_announcement_refreshes_only_after_address_change() -> None:
         coordinator._entry = entry
         coordinator._uses_sensor_polling = False
         coordinator.device = types.SimpleNamespace()
+        coordinator.last_update_success = True
+        coordinator._next_powered_udp_retry_at = 0.0
 
         current_address = "10.0.0.44"
 
@@ -2269,15 +2271,36 @@ def test_powered_udp_announcement_refreshes_only_after_address_change() -> None:
         coordinator.device.async_update_ip_address = update_ip_address
         coordinator.async_request_refresh = refresh
 
-        for _ in range(3):
+        clock = types.SimpleNamespace(monotonic=lambda: 100.0)
+        with patch("cozylife_local.coordinator.time", clock):
             await coordinator.async_handle_discovered_address("10.0.0.44")
-        assert refreshes == []
-        assert updates == []
-        await coordinator.async_handle_discovered_address("10.0.0.45")
-        await coordinator.async_handle_discovered_address("10.0.0.45")
+            assert refreshes == []
+            assert updates == []
 
-        assert refreshes == [True]
-        assert updates == [{"ip_address": "10.0.0.45"}]
+            coordinator.last_update_success = False
+            await asyncio.gather(*(
+                coordinator.async_handle_discovered_address("10.0.0.44")
+                for _ in range(3)
+            ))
+            assert refreshes == [True]
+
+            clock.monotonic = lambda: 129.9
+            await coordinator.async_handle_discovered_address("10.0.0.44")
+            assert refreshes == [True]
+
+            clock.monotonic = lambda: 130.0
+            await coordinator.async_handle_discovered_address("10.0.0.44")
+            assert refreshes == [True, True]
+
+            await coordinator.async_handle_discovered_address("10.0.0.45")
+            await coordinator.async_handle_discovered_address("10.0.0.45")
+            assert refreshes == [True, True, True]
+            assert updates == [{"ip_address": "10.0.0.45"}]
+
+            coordinator.last_update_success = True
+            clock.monotonic = lambda: 200.0
+            await coordinator.async_handle_discovered_address("10.0.0.45")
+            assert refreshes == [True, True, True]
 
     asyncio.run(exercise())
 
