@@ -24,16 +24,28 @@ def test_silent_powered_writes_expire_and_real_state_restores_health():
             pid="v3sjfa", async_request_properties=AsyncMock(return_value=True)
         )
         coordinator.data = {"16": "007803e8ffff"}
-        coordinator.async_set_updated_data = lambda data: setattr(coordinator, "data", data)
+        coordinator.last_update_success = True
+
+        def publish(data):
+            coordinator.data = data
+            coordinator.last_update_success = True
+
+        coordinator.async_set_updated_data = publish
         clock = types.SimpleNamespace(monotonic=lambda: 100.0)
         with patch("cozylife_local.coordinator.time", clock):
             await coordinator._async_get_local_state()
+            coordinator.last_update_success = False
+            with pytest.raises(RuntimeError, match="No recent CozyLife device state"):
+                await coordinator._async_get_local_state()
+            assert not coordinator.last_update_success
+            await coordinator._async_handle_device_message({"msg": {"data": {"1": 1}}})
+            assert coordinator.last_update_success
             clock.monotonic = lambda: 161.0
             for _ in range(2):
                 with pytest.raises(RuntimeError, match="No recent CozyLife device state"):
                     await coordinator._async_get_local_state()
             await coordinator._async_handle_device_message({"msg": {"data": {"3": 500}}})
-            assert await coordinator._async_get_local_state() == {"3": 500}
+            assert await coordinator._async_get_local_state() == {"1": 1, "3": 500}
             await coordinator._async_handle_device_message(
                 {"msg": {"data": {"16": "007803e8ffff"}}}
             )
@@ -129,7 +141,7 @@ def test_powered_coordinator_recovers_state_after_network_outage():
             supports_plug_metering=True, is_light=False)
         coordinator._entry = types.SimpleNamespace(data={"ip_address": "127.0.0.1"})
         coordinator.data = {}
-        coordinator.last_update_success = False
+        coordinator.last_update_success = True
 
         def publish(data):
             coordinator.data = data
@@ -156,7 +168,11 @@ def test_powered_coordinator_recovers_state_after_network_outage():
                 phase[0] = "restored"
                 state.update({"1": 0, "27": 0, "28": 0, "29": 2310})
                 server = await asyncio.start_server(peer, "127.0.0.1", port)
-                await coordinator._async_update_data()
+                try:
+                    await coordinator._async_update_data()
+                except RuntimeError as err:
+                    # The reader may receive state after the write completes.
+                    assert str(err) == "No recent CozyLife device state"
                 recovered = await asyncio.wait_for(queue.get(), 1)
                 assert coordinator.last_update_success
                 assert recovered["1"] == 0
