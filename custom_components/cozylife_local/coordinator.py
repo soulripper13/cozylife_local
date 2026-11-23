@@ -179,6 +179,8 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if getattr(self, "_closed", False):
             return
         moved = await self.device.async_update_ip_address(ip_address)
+        if getattr(self, "_closed", False):
+            return
         if moved:
             self.hass.config_entries.async_update_entry(
                 self._entry,
@@ -190,11 +192,10 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # task remains responsible for retrying between announcements.
             await self.device.async_send_status()
             return
-        # The APK's Wi-Fi writer queues a local cmd-2 request only after the
-        # device is present in its UDP cache. A matching announcement is that
-        # presence signal here; refresh while it is current rather than on an
-        # unrelated host-side timer.
-        await self.async_request_refresh()
+        # Powered devices already have a periodic TCP availability refresh.
+        # Request an immediate refresh only when discovery changes the endpoint.
+        if moved:
+            await self.async_request_refresh()
 
     @callback
     def _async_migrate_placeholder_entity_unique_ids(
