@@ -247,6 +247,11 @@ async def _async_setup_device_entry(hass, entry, device, discovery) -> bool:
         # when their matching announcement is routed, including a cached
         # announcement already received during setup.
         coordinator.async_set_updated_data({})
+        if entry.data.get("manual") and not coordinator.is_sensor:
+            # Manually added devices may live in another subnet where UDP
+            # announcements never arrive. Poll over TCP right away instead of
+            # waiting for the first periodic availability refresh.
+            hass.async_create_task(coordinator.async_request_refresh())
     else:
         # Preserve a usable manual path if Home Assistant could not create the
         # UDP listener at all.

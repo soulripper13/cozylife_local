@@ -513,6 +513,7 @@ def _load_config_flow():
     discovery.classify_device = lambda *_args: None
     discovery.get_model_info = lambda _pid: None
     discovery.supports_local_entities = lambda *_args: True
+    discovery.get_wifi_environment_sensor_models = lambda: ()
     sys.modules["cozylife_local.discovery"] = discovery
     sys.modules.pop("cozylife_local.config_flow", None)
     from cozylife_local import config_flow
@@ -542,10 +543,14 @@ def test_config_flow_creates_a_no_fields_discovery_controller() -> None:
         flow._abort_if_unique_id_configured = lambda: None
         flow.async_create_entry = lambda **kwargs: entries.append(kwargs) or kwargs
 
-        form = await flow.async_step_user()
-        result = await flow.async_step_user({})
+        flow._async_current_entries = lambda: []
+        flow.async_show_menu = lambda **kwargs: kwargs
+        menu = await flow.async_step_user()
+        form = await flow.async_step_enable_discovery()
+        result = await flow.async_step_enable_discovery({})
 
-        assert form["step_id"] == "user"
+        assert menu == {"step_id": "user", "menu_options": ["enable_discovery", "manual"]}
+        assert form["step_id"] == "enable_discovery"
         assert form["data_schema"] == {}
         assert unique_ids == ["cozylife_local_discovery_controller"]
         assert entries == [
@@ -585,6 +590,189 @@ def test_config_flow_import_creates_a_discovery_controller() -> None:
             }
         ]
         assert result == entries[0]
+
+    asyncio.run(exercise())
+
+
+def _manual_flow(config_flow):
+    """Return a config flow instance with Home Assistant hooks recorded."""
+
+    async def load_catalog(_hass) -> None:
+        return None
+
+    # The module is re-imported for every test, so this does not leak.
+    config_flow.async_load_model_catalog = load_catalog
+    flow = object.__new__(config_flow.CozyLifeConfigFlow)
+    flow.hass = object()
+    flow.unique_ids = []
+    flow.abort_updates = []
+    flow.entries = []
+
+    async def set_unique_id(unique_id: str) -> None:
+        flow.unique_ids.append(unique_id)
+
+    flow.async_set_unique_id = set_unique_id
+    flow._abort_if_unique_id_configured = (
+        lambda updates=None: flow.abort_updates.append(updates)
+    )
+    flow.async_create_entry = lambda **kwargs: flow.entries.append(kwargs) or kwargs
+    flow.async_show_form = lambda **kwargs: kwargs
+    flow.async_abort = lambda **kwargs: {"type": "abort", **kwargs}
+    return flow
+
+
+class _FakeManualDevice:
+    """Minimal local device returning a scripted TCP handshake."""
+
+    instances: list["_FakeManualDevice"] = []
+    handshake_ok = True
+
+    def __init__(self, ip_address: str) -> None:
+        self.ip_address = ip_address
+        self.closed = False
+        self.device_id = "plug-9"
+        self.pid = "plug-pid"
+        self.device_type_code = "00"
+        self.dpid = ["1", "2"]
+        self.device_model_name = "Smart Plug"
+        _FakeManualDevice.instances.append(self)
+
+    async def async_update_device_info(self) -> bool:
+        return self.handshake_ok
+
+    async def async_close(self) -> None:
+        self.closed = True
+
+
+def test_user_step_goes_straight_to_manual_when_controller_exists() -> None:
+    """With discovery already enabled the user flow adds a device by IP."""
+    config_flow = _load_config_flow()
+
+    async def exercise() -> None:
+        flow = _manual_flow(config_flow)
+        flow._async_current_entries = lambda: [
+            types.SimpleNamespace(data={"entry_type": "discovery_controller"})
+        ]
+        result = await flow.async_step_user()
+        assert result["step_id"] == "manual"
+        assert result["errors"] == {}
+
+    asyncio.run(exercise())
+
+
+def test_manual_step_rejects_an_invalid_ip_address() -> None:
+    """The add-by-IP form validates the address before connecting."""
+    config_flow = _load_config_flow()
+
+    async def exercise() -> None:
+        flow = _manual_flow(config_flow)
+        _FakeManualDevice.instances = []
+        with patch.object(config_flow, "CozyLifeDevice", _FakeManualDevice):
+            result = await flow.async_step_manual(
+                {"ip_address": "10.0.300.1", "sensor_pid": "auto"}
+            )
+        assert result["step_id"] == "manual"
+        assert result["errors"] == {"ip_address": "invalid_ip"}
+        assert _FakeManualDevice.instances == []
+
+    asyncio.run(exercise())
+
+
+def test_manual_step_creates_entry_from_tcp_handshake() -> None:
+    """A device in another subnet is added from its TCP/5555 identity."""
+    config_flow = _load_config_flow()
+    classification = types.SimpleNamespace(is_local_transport=True, is_light=False)
+
+    async def exercise() -> None:
+        flow = _manual_flow(config_flow)
+        _FakeManualDevice.instances = []
+        _FakeManualDevice.handshake_ok = True
+        with (
+            patch.object(config_flow, "CozyLifeDevice", _FakeManualDevice),
+            patch.object(config_flow, "classify_device", lambda *_a: classification),
+        ):
+            result = await flow.async_step_manual(
+                {"ip_address": " 192.168.50.7 ", "sensor_pid": "auto"}
+            )
+
+        assert _FakeManualDevice.instances[0].ip_address == "192.168.50.7"
+        assert _FakeManualDevice.instances[0].closed
+        assert flow.unique_ids == ["plug-9"]
+        assert flow.abort_updates == [{"ip_address": "192.168.50.7"}]
+        assert result == {
+            "title": "Smart Plug",
+            "data": {
+                "ip_address": "192.168.50.7",
+                "device_id": "plug-9",
+                "pid": "plug-pid",
+                "device_type_code": "00",
+                "dpids": ["1", "2"],
+                "min_kelvin": 2000,
+                "max_kelvin": 6500,
+                "manual": True,
+            },
+        }
+
+    asyncio.run(exercise())
+
+
+def test_manual_step_reports_unreachable_device() -> None:
+    """A failed TCP handshake re-shows the form with cannot_connect."""
+    config_flow = _load_config_flow()
+
+    async def exercise() -> None:
+        flow = _manual_flow(config_flow)
+        _FakeManualDevice.instances = []
+        _FakeManualDevice.handshake_ok = False
+        try:
+            with patch.object(config_flow, "CozyLifeDevice", _FakeManualDevice):
+                result = await flow.async_step_manual(
+                    {"ip_address": "192.168.50.7", "sensor_pid": "auto"}
+                )
+        finally:
+            _FakeManualDevice.handshake_ok = True
+
+        assert result["step_id"] == "manual"
+        assert result["errors"] == {"base": "cannot_connect"}
+        assert _FakeManualDevice.instances[0].closed
+        assert flow.entries == []
+
+    asyncio.run(exercise())
+
+
+def test_manual_step_adds_sleeping_sensor_without_tcp() -> None:
+    """A selected sleeping sensor model is added with a placeholder identity."""
+    config_flow = _load_config_flow()
+    model = types.SimpleNamespace(
+        product_id="Z4tRml",
+        model_name="Temp Sensor",
+        dpids=frozenset({"4", "8", "9"}),
+    )
+
+    async def exercise() -> None:
+        flow = _manual_flow(config_flow)
+        _FakeManualDevice.instances = []
+        with (
+            patch.object(config_flow, "CozyLifeDevice", _FakeManualDevice),
+            patch.object(config_flow, "get_model_info", lambda _pid: model),
+            patch.object(
+                config_flow, "get_wifi_environment_sensor_models", lambda: (model,)
+            ),
+        ):
+            result = await flow.async_step_manual(
+                {"ip_address": "192.168.50.8", "sensor_pid": "Z4tRml"}
+            )
+
+        assert _FakeManualDevice.instances == []
+        assert flow.unique_ids == ["sleeping_sensor_Z4tRml_192.168.50.8"]
+        assert result["data"] == {
+            "ip_address": "192.168.50.8",
+            "device_id": "sleeping_sensor_Z4tRml_192.168.50.8",
+            "pid": "Z4tRml",
+            "device_type_code": "03",
+            "dpids": ["4", "8", "9"],
+            "manual": True,
+        }
 
     asyncio.run(exercise())
 

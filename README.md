@@ -98,9 +98,13 @@ Once HACS has completed installation and Home Assistant has restarted:
 1. Navigate to `Settings` ➔ `Devices & Services`.
 2. Click `+ ADD INTEGRATION` in the bottom-right.
 3. Search for **"CozyLife Local"** and click to open the configuration flow.
-4. Click **Submit**. This creates the integration's one discovery controller; there are no device IP, CIDR, or sensor-profile fields.
+4. Choose **Enable local network discovery** and click **Submit**. This creates the integration's one discovery controller; it has no fields.
 
 The controller keeps one shared local UDP listener active. A supported Wi-Fi device that announces itself on UDP/6095 appears in Home Assistant's normal discovered-device card. Click **Add** to create its entry from the captured DID, PID, and IP plus the APK model catalogue DPID profile. Adding the entry does not require a synchronous TCP inventory reply; later local state and control use TCP/5555.
+
+### Adding a Device by IP Address
+
+UDP discovery uses broadcasts, which do not cross subnets or VLANs. If a device lives in another subnet but Home Assistant can reach it on TCP/5555, open the integration flow again (or choose it from the first menu) and select **Add a device by IP address**. With **Auto-detect**, the integration reads the device's DID, PID, and DPIDs over TCP/5555 and creates its entry; the device must be online. For a sleeping temperature/humidity sensor, pick its model instead so the entry is created without waking it. Give such devices a static IP or DHCP reservation: discovery cannot follow an address change across subnets.
 
 When updating an existing installation, restart Home Assistant after HACS has installed the update. Do not remove a working CozyLife config entry merely to update it: removing an entry can discard Home Assistant's entity-registry continuity and history.
 

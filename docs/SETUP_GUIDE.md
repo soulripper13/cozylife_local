@@ -13,6 +13,7 @@ To get the most out of your local smart home setup and avoid connection drops, f
    * [Step 2.2: Assigning Static IPs / DHCP Reservations](#step-22-assigning-static-ips--dhcp-reservations)
    * [Step 2.3: Locating Your Device's IP Address](#step-23-locating-your-devices-ip-address)
 3. [Home Assistant Integration Setup](#3-home-assistant-integration-setup)
+   * [Adding a Device in Another Subnet or VLAN](#adding-a-device-in-another-subnet-or-vlan)
 4. [Device-Specific Guides & Behaviors](#4-device-specific-guides--behaviors)
    * [Wall Switches & Multi-Gang Switch Rockers](#wall-switches--multi-gang-switch-rockers)
    * [Smart Plugs & Power Monitoring Outlets](#smart-plugs--power-monitoring-outlets)
@@ -97,9 +98,22 @@ Once your device is connected to Wi-Fi, add CozyLife Local to Home Assistant:
 Settings ➔ Devices & Services ➔ + Add Integration ➔ CozyLife Local
 ```
 
-Click **Submit**. The integration creates one persistent discovery controller with no IP address, CIDR, or sensor-profile fields. It sends the APK-style UDP/6095 discovery frame at startup and then every 10 seconds. A newly announced supported Wi-Fi device appears in Home Assistant's normal discovered-device card; click **Add** to create its entry from the captured DID, PID, and IP plus the APK model catalogue DPID profile. Adding does not require a synchronous TCP inventory reply.
+Choose **Enable local network discovery** and click **Submit**. The integration creates one persistent discovery controller with no fields. It sends the APK-style UDP/6095 discovery frame at startup and then every 10 seconds. A newly announced supported Wi-Fi device appears in Home Assistant's normal discovered-device card; click **Add** to create its entry from the captured DID, PID, and IP plus the APK model catalogue DPID profile. Adding does not require a synchronous TCP inventory reply.
 
 For a supported sleeping temperature/humidity sensor, the same saved announcement creates the entry and then begins 250 ms known-address status probing. This is a local connection-attempt cadence, not a claimed device wake or reporting schedule.
+
+### Adding a Device in Another Subnet or VLAN
+
+UDP/6095 discovery broadcasts do not cross subnets. If the device is in another subnet but reachable from Home Assistant on TCP port `5555`, add it manually:
+
+```
+Settings ➔ Devices & Services ➔ + Add Integration ➔ CozyLife Local ➔ Add a device by IP address
+```
+
+* **Auto-detect** (default): the device must be online. The integration reads its identity and DPID list over TCP/5555 and creates the entry, which is then polled over TCP like any powered device.
+* **Sleeping sensor model**: creates the entry without waking the sensor; its real device ID is verified on the first local report.
+
+Assign the device a static IP or DHCP reservation ([Step 2.2](#step-22-assigning-static-ips--dhcp-reservations)), because discovery cannot follow an address change across subnets. Firewalls between the subnets must allow Home Assistant → device TCP/5555.
 
 After setup, the integration exposes the configured local IP address as a diagnostic sensor on the Home Assistant device page. Use that visible IP when checking DHCP reservations, router firewall rules, or direct port `5555` connectivity.
 

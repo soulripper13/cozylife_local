@@ -3,7 +3,27 @@
     "step": {
       "user": {
         "title": "CozyLife Local",
+        "description": "Choose how to add CozyLife devices.",
+        "menu_options": {
+          "enable_discovery": "Enable local network discovery",
+          "manual": "Add a device by IP address"
+        }
+      },
+      "enable_discovery": {
+        "title": "CozyLife Local",
         "description": "Click Submit once to enable local discovery. Newly announced devices appear through Home Assistant's normal discovered-device card, where you choose whether to add them."
+      },
+      "manual": {
+        "title": "Add CozyLife device by IP",
+        "description": "Use this for devices that UDP discovery cannot see, for example in another subnet or VLAN. Home Assistant must be able to reach the device on TCP port 5555. Give the device a static IP or DHCP reservation, because discovery cannot follow an address change across subnets.",
+        "data": {
+          "ip_address": "IP address",
+          "sensor_pid": "Device type"
+        },
+        "data_description": {
+          "ip_address": "IPv4 address of the CozyLife device.",
+          "sensor_pid": "Keep Auto-detect for powered devices: the device is queried now over TCP. Pick a sleeping temperature/humidity sensor model to add it without waking it."
+        }
       },
       "confirm_discovery": {
         "title": "CozyLife device found",
@@ -13,7 +33,15 @@
     "abort": {
       "already_configured": "This CozyLife device is already configured in Home Assistant.",
       "invalid_discovery": "The discovered CozyLife announcement did not contain a valid device identity or IPv4 address.",
-      "unsupported_announced_model": "The announced device is not an APK-catalogued Wi-Fi product with entities supported by this integration."
+      "unsupported_announced_model": "The announced device is not an APK-catalogued Wi-Fi product with entities supported by this integration.",
+      "unsupported_device": "This device is not a local Wi-Fi product with entities supported by this integration."
+    },
+    "error": {
+      "invalid_ip": "Enter a valid IPv4 address.",
+      "cannot_connect": "Unable to read device information on TCP port 5555. Check the IP address and that the port is reachable from Home Assistant.",
+      "timeout_connect": "Timed out connecting to the device on TCP port 5555.",
+      "unsupported_device": "This device is not a local Wi-Fi product with entities supported by this integration.",
+      "unknown": "Unexpected error. Check the Home Assistant log."
     }
   },
   "options": {
@@ -31,7 +59,7 @@
         },
         "data_description": {
           "enable_debug": "Logs safe protocol summaries and DPID names for diagnosing local transport or entity-mapping problems. It omits local identity and raw state values.",
-"filter_outliers": "Optional four-sample median filter. Rejected samples advance the window so sustained changes are eventually accepted. Duplicate or unidentified reports do not advance it. Disabled passes valid readings, including zero. Enable this option if you experience false-zero readings or other measurement spikes.",
+          "filter_outliers": "Optional four-sample median filter. Rejected samples advance the window so sustained changes are eventually accepted. Duplicate or unidentified reports do not advance it. Disabled passes valid readings, including zero. Enable this option if you experience false-zero readings or other measurement spikes.",
           "min_kelvin": "Adjust the warmest color temperature limit (Kelvin) for this light bulb.",
           "max_kelvin": "Adjust the coolest color temperature limit (Kelvin) for this light bulb."
         }
