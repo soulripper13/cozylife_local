@@ -618,6 +618,7 @@ def _manual_flow(config_flow):
     flow.async_create_entry = lambda **kwargs: flow.entries.append(kwargs) or kwargs
     flow.async_show_form = lambda **kwargs: kwargs
     flow.async_abort = lambda **kwargs: {"type": "abort", **kwargs}
+    flow._async_current_entries = lambda: []
     return flow
 
 
@@ -775,6 +776,78 @@ def test_manual_step_adds_sleeping_sensor_without_tcp() -> None:
         }
 
     asyncio.run(exercise())
+
+
+def _sleeping_sensor_models():
+    """Return two selectable sleeping sensor models keyed by PID."""
+    return {
+        pid: types.SimpleNamespace(
+            product_id=pid,
+            model_name=f"Temp Sensor {pid}",
+            dpids=frozenset({"4", "8", "9"}),
+        )
+        for pid in ("Z4tRml", "Ab12Cd")
+    }
+
+
+def _assert_sleeping_sensor_add_is_rejected(existing_data: dict) -> None:
+    """Adding a sleeping sensor at an IP that already has an entry aborts."""
+    config_flow = _load_config_flow()
+    models = _sleeping_sensor_models()
+    existing = types.SimpleNamespace(entry_id="existing", data=dict(existing_data))
+
+    async def exercise() -> None:
+        flow = _manual_flow(config_flow)
+        flow._async_current_entries = lambda: [existing]
+        _FakeManualDevice.instances = []
+        with (
+            patch.object(config_flow, "CozyLifeDevice", _FakeManualDevice),
+            patch.object(config_flow, "get_model_info", models.get),
+            patch.object(
+                config_flow,
+                "get_wifi_environment_sensor_models",
+                lambda: tuple(models.values()),
+            ),
+        ):
+            result = await flow.async_step_manual(
+                {"ip_address": "192.168.50.8", "sensor_pid": "Z4tRml"}
+            )
+
+        assert result == {"type": "abort", "reason": "already_configured"}
+        assert flow.entries == []
+        assert flow.unique_ids == []
+        assert _FakeManualDevice.instances == []
+        assert existing.data == existing_data
+
+    asyncio.run(exercise())
+
+
+def test_manual_sleeping_sensor_rejects_ip_of_placeholder_with_other_model() -> None:
+    """A placeholder created with another model still owns its IP address."""
+    _assert_sleeping_sensor_add_is_rejected(
+        {
+            "ip_address": "192.168.50.8",
+            "device_id": "sleeping_sensor_Ab12Cd_192.168.50.8",
+            "pid": "Ab12Cd",
+            "device_type_code": "03",
+            "dpids": ["4", "8", "9"],
+            "manual": True,
+        }
+    )
+
+
+def test_manual_sleeping_sensor_rejects_ip_of_promoted_entry() -> None:
+    """An entry promoted to its real device ID still owns its IP address."""
+    _assert_sleeping_sensor_add_is_rejected(
+        {
+            "ip_address": "192.168.50.8",
+            "device_id": "real-did-123",
+            "pid": "Z4tRml",
+            "device_type_code": "03",
+            "dpids": ["4", "8", "9"],
+            "manual": True,
+        }
+    )
 
 
 def test_udp_discovery_shows_normal_confirmation_before_adding() -> None:
