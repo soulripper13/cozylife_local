@@ -20,6 +20,7 @@ from .const import (
     LIGHT_COUNTDOWN,
     SENSOR_HUMIDITY,
     SENSOR_TEMPERATURE,
+    SLEEPING_SENSOR_ID_PREFIX,
 )
 from .cozylife_api import CozyLifeDevice
 from .discovery import classify_device, get_model_info
@@ -422,7 +423,9 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._async_request_missing_powered_state(received_state)
         if (
             self._uses_sensor_polling
-            and self._entry.data.get("device_id", "").startswith("sleeping_sensor_")
+            and self._entry.data.get("device_id", "").startswith(
+                SLEEPING_SENSOR_ID_PREFIX
+            )
             and self._identity_refresh_task is None
         ):
             self._identity_refresh_task = self.hass.async_create_background_task(

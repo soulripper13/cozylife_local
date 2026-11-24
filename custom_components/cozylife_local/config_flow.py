@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import ipaddress
 from typing import Any, Dict, Optional
@@ -14,15 +15,21 @@ from .const import (
     DEFAULT_MAX_KELVIN,
     DEFAULT_MIN_KELVIN,
     LIGHT_KELVIN_RANGES,
+    SENSOR_TYPE_CODE,
+    SLEEPING_SENSOR_ID_PREFIX,
 )
+from .cozylife_api import CozyLifeDevice
 from .discovery import (
     async_load_model_catalog,
     classify_device,
     get_model_info,
+    get_wifi_environment_sensor_models,
     supports_local_entities,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+AUTO_DETECT = "auto"
 
 def _kelvin_range_for_pid(pid: str | None) -> tuple[int, int]:
     """Return the default Kelvin range for a light model."""
@@ -38,9 +45,24 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(self, user_input: Optional[Dict[str, Any]] = None) -> FlowResult:
+        """Offer local discovery or adding one device by its IP address."""
+        has_controller = any(
+            entry.data.get("entry_type") == DISCOVERY_CONTROLLER_ENTRY_TYPE
+            for entry in self._async_current_entries()
+        )
+        if has_controller:
+            return await self.async_step_manual()
+        return self.async_show_menu(
+            step_id="user",
+            menu_options=["enable_discovery", "manual"],
+        )
+
+    async def async_step_enable_discovery(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
         """Create the one persistent, no-fields discovery controller entry."""
         if user_input is None:
-            return self.async_show_form(step_id="user", data_schema=vol.Schema({}))
+            return self.async_show_form(step_id="enable_discovery", data_schema=vol.Schema({}))
 
         await self.async_set_unique_id(f"{DOMAIN}_discovery_controller")
         self._abort_if_unique_id_configured()
@@ -59,6 +81,48 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(
             title="CozyLife Local",
             data={"entry_type": DISCOVERY_CONTROLLER_ENTRY_TYPE},
+        )
+
+    def _find_conflicting_entry(
+        self, ip_address: str, device_id: Optional[str] = None
+    ) -> Optional[config_entries.ConfigEntry]:
+        """Return an existing entry that already represents this device.
+
+        A sleeping sensor added by hand keeps its placeholder config-entry
+        unique ID even after its real device ID is stored in its data, so a
+        unique-ID check alone misses it. Match the stored device ID as well.
+
+        An address match counts when the real device ID is unknown, or when
+        the entry at that address has not learned its own real ID yet. An
+        entry with a different real ID at the same address is another
+        device, e.g. after a DHCP lease moved, and must not block this one.
+        """
+        for entry in self._async_current_entries(include_ignore=False):
+            entry_device_id = str(entry.data.get("device_id") or "")
+            if device_id and device_id in (entry_device_id, entry.unique_id):
+                return entry
+            if entry.data.get("ip_address") == ip_address and (
+                not device_id
+                or entry_device_id.startswith(SLEEPING_SENSOR_ID_PREFIX)
+            ):
+                return entry
+        return None
+
+    def _abort_for_conflict(
+        self,
+        entry: config_entries.ConfigEntry,
+        ip_address: str,
+        device_id: Optional[str] = None,
+    ) -> FlowResult:
+        """Abort, naming the entry when only its address conflicts."""
+        if device_id and device_id in (entry.data.get("device_id"), entry.unique_id):
+            return self.async_abort(reason="already_configured")
+        return self.async_abort(
+            reason="ip_already_configured",
+            description_placeholders={
+                "title": entry.title,
+                "ip_address": ip_address,
+            },
         )
 
     async def async_step_integration_discovery(
@@ -91,6 +155,12 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Create a confirmed entry from its saved UDP announcement."""
         ip_address = discovery_info["ip_address"]
         device_id = discovery_info["device_id"]
+
+        # The card may have been open while the same device was added by IP;
+        # the unique-ID check made when the card appeared cannot see that.
+        conflict = self._find_conflicting_entry(ip_address, device_id)
+        if conflict is not None:
+            return self._abort_for_conflict(conflict, ip_address, device_id)
 
         # The APK treats an announced DID/IP pair as the local identity. It
         # associates that identity with its catalogue profile, then refreshes
@@ -158,6 +228,153 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "device": device_name,
                 "ip_address": discovery_info["ip_address"],
+            },
+        )
+
+    def _manual_schema(self, user_input: Optional[Dict[str, Any]] = None) -> vol.Schema:
+        """Return the add-by-IP form schema."""
+        user_input = user_input or {}
+        sensor_options = {AUTO_DETECT: "Auto-detect (device must be online)"}
+        sensor_options.update(
+            {
+                model.product_id: (
+                    f"{model.model_name or 'Temperature/humidity sensor'}"
+                    f" ({model.product_id})"
+                )
+                for model in get_wifi_environment_sensor_models()
+            }
+        )
+        return vol.Schema(
+            {
+                vol.Required(
+                    "ip_address", default=user_input.get("ip_address", "")
+                ): str,
+                vol.Optional(
+                    "sensor_pid",
+                    default=user_input.get("sensor_pid", AUTO_DETECT),
+                ): vol.In(sensor_options),
+            }
+        )
+
+    async def async_step_manual(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
+        """Add a device by IP address, e.g. one in another subnet or VLAN.
+
+        UDP discovery relies on broadcasts that do not cross subnets, but the
+        device's local TCP control port (5555) may still be routable.
+        """
+        await async_load_model_catalog(self.hass)
+        errors: Dict[str, str] = {}
+        if user_input is not None:
+            ip_address = str(user_input.get("ip_address", "")).strip()
+            try:
+                ipaddress.IPv4Address(ip_address)
+            except ipaddress.AddressValueError:
+                errors["ip_address"] = "invalid_ip"
+            else:
+                sensor_pid = user_input.get("sensor_pid", AUTO_DETECT)
+                if sensor_pid and sensor_pid != AUTO_DETECT:
+                    return await self._async_create_sleeping_sensor_entry(
+                        ip_address, sensor_pid
+                    )
+                result, error = await self._async_create_entry_from_ip(ip_address)
+                if result is not None:
+                    return result
+                errors["base"] = error
+
+        return self.async_show_form(
+            step_id="manual",
+            data_schema=self._manual_schema(user_input),
+            errors=errors,
+        )
+
+    async def _async_create_entry_from_ip(
+        self, ip_address: str
+    ) -> tuple[Optional[FlowResult], str]:
+        """Read a device's identity over local TCP and create its entry."""
+        device = CozyLifeDevice(ip_address)
+        try:
+            if not await device.async_update_device_info():
+                return None, "cannot_connect"
+        except asyncio.TimeoutError:
+            return None, "timeout_connect"
+        except OSError:
+            return None, "cannot_connect"
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Unexpected error during CozyLife manual setup")
+            return None, "unknown"
+        finally:
+            await device.async_close()
+
+        await self.async_set_unique_id(device.device_id)
+        self._abort_if_unique_id_configured(updates={"ip_address": ip_address})
+        conflict = self._find_conflicting_entry(ip_address, device.device_id)
+        if conflict is not None:
+            return (
+                self._abort_for_conflict(conflict, ip_address, device.device_id),
+                "",
+            )
+
+        dpids = [str(dpid) for dpid in (device.dpid or [])]
+        classification = classify_device(device.pid, device.device_type_code, dpids)
+        if not (
+            classification.is_local_transport
+            and supports_local_entities(device.pid, classification)
+        ):
+            return None, "unsupported_device"
+
+        min_kelvin, max_kelvin = (
+            _kelvin_range_for_pid(device.pid)
+            if classification.is_light
+            else (DEFAULT_MIN_KELVIN, DEFAULT_MAX_KELVIN)
+        )
+        return (
+            self.async_create_entry(
+                title=device.device_model_name or f"CozyLife {ip_address}",
+                data={
+                    "ip_address": ip_address,
+                    "device_id": device.device_id,
+                    "pid": device.pid,
+                    "device_type_code": device.device_type_code,
+                    "dpids": dpids,
+                    "min_kelvin": min_kelvin,
+                    "max_kelvin": max_kelvin,
+                    "manual": True,
+                },
+            ),
+            "",
+        )
+
+    async def _async_create_sleeping_sensor_entry(
+        self, ip_address: str, pid: str
+    ) -> FlowResult:
+        """Create a sleeping sensor entry without waking the device.
+
+        The entry starts with a placeholder device ID; the coordinator
+        replaces it with the verified ID after the first local report.
+        """
+        model = get_model_info(pid)
+        if model is None or model not in get_wifi_environment_sensor_models():
+            return self.async_abort(reason="unsupported_device")
+        # The placeholder ID below embeds the selected model, and an awake
+        # sensor's entry is promoted to its real device ID, so the unique-ID
+        # check alone cannot catch an entry that already owns this address.
+        conflict = self._find_conflicting_entry(ip_address)
+        if conflict is not None:
+            return self._abort_for_conflict(conflict, ip_address)
+        device_id = f"{SLEEPING_SENSOR_ID_PREFIX}{pid}_{ip_address}"
+        await self.async_set_unique_id(device_id)
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(
+            title=f"{model.model_name or 'CozyLife sensor'} @ {ip_address}",
+            data={
+                "ip_address": ip_address,
+                "device_id": device_id,
+                "pid": pid,
+                "device_type_code": SENSOR_TYPE_CODE,
+                "dpids": sorted(model.dpids),
+                "manual": True,
             },
         )
 

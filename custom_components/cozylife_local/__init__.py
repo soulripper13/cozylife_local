@@ -11,7 +11,12 @@ from .background_discovery import (
     DATA_DISCOVERY_SERVICE,
     async_get_background_discovery,
 )
-from .const import DISCOVERY_CONTROLLER_ENTRY_TYPE, DOMAIN, PLATFORMS
+from .const import (
+    DISCOVERY_CONTROLLER_ENTRY_TYPE,
+    DOMAIN,
+    PLATFORMS,
+    SLEEPING_SENSOR_ID_PREFIX,
+)
 from .coordinator import CozyLifeCoordinator
 from .cozylife_api import CozyLifeDevice
 from .discovery import async_load_model_catalog
@@ -230,7 +235,7 @@ async def _async_setup_device_entry(hass, entry, device, discovery) -> bool:
             entry.entry_id,
             coordinator.async_handle_discovered_address,
         )
-        if coordinator.is_sensor and device.device_id.startswith("sleeping_sensor_"):
+        if coordinator.is_sensor and device.device_id.startswith(SLEEPING_SENSOR_ID_PREFIX):
             # Manual sleeping-sensor setup begins with an entry-local ID. A
             # UDP reply can still prove this configured address is reachable;
             # use it to request status, while TCP remains responsible for
@@ -247,6 +252,11 @@ async def _async_setup_device_entry(hass, entry, device, discovery) -> bool:
         # when their matching announcement is routed, including a cached
         # announcement already received during setup.
         coordinator.async_set_updated_data({})
+        if entry.data.get("manual") and not coordinator.is_sensor:
+            # Manually added devices may live in another subnet where UDP
+            # announcements never arrive. Poll over TCP right away instead of
+            # waiting for the first periodic availability refresh.
+            hass.async_create_task(coordinator.async_request_refresh())
     else:
         # Preserve a usable manual path if Home Assistant could not create the
         # UDP listener at all.
