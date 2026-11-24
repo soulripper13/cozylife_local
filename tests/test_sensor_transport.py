@@ -618,7 +618,7 @@ def _manual_flow(config_flow):
     flow.async_create_entry = lambda **kwargs: flow.entries.append(kwargs) or kwargs
     flow.async_show_form = lambda **kwargs: kwargs
     flow.async_abort = lambda **kwargs: {"type": "abort", **kwargs}
-    flow._async_current_entries = lambda: []
+    flow._async_current_entries = lambda include_ignore=None: []
     return flow
 
 
@@ -790,15 +790,40 @@ def _sleeping_sensor_models():
     }
 
 
+def _config_entry(title: str, data: dict, unique_id: str | None = None):
+    """Return a minimal stored config entry."""
+    return types.SimpleNamespace(
+        entry_id=title, title=title, unique_id=unique_id, data=dict(data)
+    )
+
+
+def _unrelated_entries() -> list:
+    """Entries that must never be mistaken for a device at any address."""
+    return [
+        _config_entry(
+            "CozyLife discovery",
+            {"entry_type": "discovery_controller"},
+            "cozylife_local_discovery_controller",
+        ),
+        _config_entry("Ignored", {}, "ignored-did"),
+    ]
+
+
 def _assert_sleeping_sensor_add_is_rejected(existing_data: dict) -> None:
     """Adding a sleeping sensor at an IP that already has an entry aborts."""
     config_flow = _load_config_flow()
     models = _sleeping_sensor_models()
-    existing = types.SimpleNamespace(entry_id="existing", data=dict(existing_data))
+    existing = _config_entry(
+        "Living room sensor",
+        existing_data,
+        "sleeping_sensor_Ab12Cd_192.168.50.8",
+    )
 
     async def exercise() -> None:
         flow = _manual_flow(config_flow)
-        flow._async_current_entries = lambda: [existing]
+        flow._async_current_entries = (
+            lambda include_ignore=None: [*_unrelated_entries(), existing]
+        )
         _FakeManualDevice.instances = []
         with (
             patch.object(config_flow, "CozyLifeDevice", _FakeManualDevice),
@@ -813,7 +838,14 @@ def _assert_sleeping_sensor_add_is_rejected(existing_data: dict) -> None:
                 {"ip_address": "192.168.50.8", "sensor_pid": "Z4tRml"}
             )
 
-        assert result == {"type": "abort", "reason": "already_configured"}
+        assert result == {
+            "type": "abort",
+            "reason": "ip_already_configured",
+            "description_placeholders": {
+                "title": "Living room sensor",
+                "ip_address": "192.168.50.8",
+            },
+        }
         assert flow.entries == []
         assert flow.unique_ids == []
         assert _FakeManualDevice.instances == []
@@ -850,6 +882,155 @@ def test_manual_sleeping_sensor_rejects_ip_of_promoted_entry() -> None:
     )
 
 
+def _auto_detect(existing: list):
+    """Run an auto-detect manual add of plug-9 at 192.168.50.7."""
+    config_flow = _load_config_flow()
+    classification = types.SimpleNamespace(is_local_transport=True, is_light=False)
+
+    async def exercise():
+        flow = _manual_flow(config_flow)
+        flow._async_current_entries = (
+            lambda include_ignore=None: [*_unrelated_entries(), *existing]
+        )
+        _FakeManualDevice.instances = []
+        _FakeManualDevice.handshake_ok = True
+        with (
+            patch.object(config_flow, "CozyLifeDevice", _FakeManualDevice),
+            patch.object(config_flow, "classify_device", lambda *_a: classification),
+        ):
+            result = await flow.async_step_manual(
+                {"ip_address": "192.168.50.7", "sensor_pid": "auto"}
+            )
+        return flow, result
+
+    return asyncio.run(exercise())
+
+
+def test_manual_auto_detect_rejects_ip_of_sleeping_placeholder() -> None:
+    """An awake sensor is not added twice while its entry is a placeholder."""
+    data = {
+        "ip_address": "192.168.50.7",
+        "device_id": "sleeping_sensor_Z4tRml_192.168.50.7",
+        "pid": "Z4tRml",
+    }
+    existing = _config_entry(
+        "Bedroom sensor", data, "sleeping_sensor_Z4tRml_192.168.50.7"
+    )
+
+    flow, result = _auto_detect([existing])
+
+    assert result == {
+        "type": "abort",
+        "reason": "ip_already_configured",
+        "description_placeholders": {
+            "title": "Bedroom sensor",
+            "ip_address": "192.168.50.7",
+        },
+    }
+    assert flow.entries == []
+    assert existing.data == data
+
+
+def test_manual_auto_detect_rejects_promoted_entry_with_same_did() -> None:
+    """A promoted entry keeps its placeholder unique ID but owns its real DID."""
+    data = {"ip_address": "192.168.50.99", "device_id": "plug-9", "pid": "Z4tRml"}
+    existing = _config_entry(
+        "Bedroom sensor", data, "sleeping_sensor_Z4tRml_192.168.50.99"
+    )
+
+    flow, result = _auto_detect([existing])
+
+    assert result == {"type": "abort", "reason": "already_configured"}
+    assert flow.entries == []
+    assert existing.data == data
+
+
+def test_manual_auto_detect_allows_new_device_at_reused_ip() -> None:
+    """Another real device at a reused address does not block a new one."""
+    existing = _config_entry(
+        "Old plug",
+        {"ip_address": "192.168.50.7", "device_id": "plug-1", "pid": "plug-pid"},
+        "plug-1",
+    )
+
+    flow, result = _auto_detect([existing])
+
+    assert flow.unique_ids == ["plug-9"]
+    assert result["data"]["device_id"] == "plug-9"
+    assert flow.entries == [result]
+
+
+def _confirm_stale_udp_card(added_while_open):
+    """Show a UDP card for plug-1, add an entry, then confirm the card."""
+    config_flow = _load_config_flow()
+
+    async def exercise():
+        flow = _manual_flow(config_flow)
+        current: list = list(_unrelated_entries())
+        flow._async_current_entries = lambda include_ignore=None: list(current)
+        model = types.SimpleNamespace(
+            model_name="Smart Plug",
+            type_code="01",
+            network_type="02",
+            dpids=frozenset({"1"}),
+        )
+        classification = types.SimpleNamespace(
+            is_local_transport=True, is_light=False
+        )
+        with (
+            patch.object(config_flow, "get_model_info", lambda _pid: model),
+            patch.object(config_flow, "classify_device", lambda *_a: classification),
+        ):
+            card = await flow.async_step_integration_discovery(
+                {
+                    "device_id": "plug-1",
+                    "ip_address": "10.0.0.44",
+                    "pid": "plug-pid",
+                    "device_type_code": "01",
+                }
+            )
+            current.append(added_while_open)
+            result = await flow.async_step_confirm_discovery({})
+        assert card["step_id"] == "confirm_discovery"
+        return flow, result
+
+    return asyncio.run(exercise())
+
+
+def test_confirming_stale_udp_card_rejects_promoted_entry() -> None:
+    """A card confirmed after its DID was added by hand creates no duplicate."""
+    data = {"ip_address": "10.0.0.50", "device_id": "plug-1", "pid": "plug-pid"}
+    existing = _config_entry(
+        "Plug", data, "sleeping_sensor_plug-pid_10.0.0.50"
+    )
+
+    flow, result = _confirm_stale_udp_card(existing)
+
+    assert result == {"type": "abort", "reason": "already_configured"}
+    assert flow.entries == []
+    assert existing.data == data
+
+
+def test_confirming_stale_udp_card_rejects_sleeping_placeholder_at_ip() -> None:
+    """A card confirmed after a placeholder took its IP creates no duplicate."""
+    data = {
+        "ip_address": "10.0.0.44",
+        "device_id": "sleeping_sensor_Z4tRml_10.0.0.44",
+        "pid": "Z4tRml",
+    }
+    existing = _config_entry("Sensor", data, "sleeping_sensor_Z4tRml_10.0.0.44")
+
+    flow, result = _confirm_stale_udp_card(existing)
+
+    assert result == {
+        "type": "abort",
+        "reason": "ip_already_configured",
+        "description_placeholders": {"title": "Sensor", "ip_address": "10.0.0.44"},
+    }
+    assert flow.entries == []
+    assert existing.data == data
+
+
 def test_udp_discovery_shows_normal_confirmation_before_adding() -> None:
     """A UDP candidate follows Home Assistant's ordinary Add-device flow."""
     config_flow = _load_config_flow()
@@ -864,6 +1045,7 @@ def test_udp_discovery_shows_normal_confirmation_before_adding() -> None:
 
         flow.async_set_unique_id = set_unique_id
         flow._abort_if_unique_id_configured = lambda: None
+        flow._async_current_entries = lambda include_ignore=None: []
         flow.hass = object()
         flow.async_show_form = lambda **kwargs: forms.append(kwargs) or kwargs
 
@@ -907,6 +1089,7 @@ def test_confirming_udp_catalogued_plug_needs_no_tcp_inventory() -> None:
 
         flow.async_set_unique_id = set_unique_id
         flow._abort_if_unique_id_configured = lambda: None
+        flow._async_current_entries = lambda include_ignore=None: []
         flow.async_create_entry = lambda **kwargs: entries.append(kwargs) or kwargs
         flow.async_show_form = lambda **kwargs: cards.append(kwargs) or kwargs
         model = types.SimpleNamespace(

@@ -32,6 +32,7 @@
     },
     "abort": {
       "already_configured": "This CozyLife device is already configured in Home Assistant.",
+      "ip_already_configured": "{ip_address} is already used by the CozyLife entry **{title}**. Remove that entry first if a different device now has this address.",
       "invalid_discovery": "The discovered CozyLife announcement did not contain a valid device identity or IPv4 address.",
       "unsupported_announced_model": "The announced device is not an APK-catalogued Wi-Fi product with entities supported by this integration.",
       "unsupported_device": "This device is not a local Wi-Fi product with entities supported by this integration."

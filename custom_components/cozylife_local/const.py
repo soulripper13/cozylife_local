@@ -2,6 +2,9 @@
 
 DOMAIN = "cozylife_local"
 DISCOVERY_CONTROLLER_ENTRY_TYPE = "discovery_controller"
+# Device ID prefix of a manually added sleeping sensor that has not yet
+# reported its real device ID.
+SLEEPING_SENSOR_ID_PREFIX = "sleeping_sensor_"
 
 # Local DPID names used by currently exposed, catalog-backed entities.
 SWITCH = '1'
