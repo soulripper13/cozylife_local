@@ -12,6 +12,12 @@ For the retained door-contact panel, DPID 7 reports open/closed and
 DPID 9 reports charge in tenths of a percent. These contact profiles
 expose a battery diagnostic when the device advertises DPID 9.
 
+## Adding products
+
+Add new products through a reviewed pull request after verifying them
+against a newer CozyLife APK. Confirm the product ID, Wi-Fi transport,
+and the panel's DPID read and write behavior for the proposed entities.
+
 ## Implemented local families
 
 | APK family | Local entity coverage | Evidence |
