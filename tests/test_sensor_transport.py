@@ -495,9 +495,17 @@ def _load_config_flow():
         def __init_subclass__(cls, **_kwargs) -> None:
             return None
 
+        def _set_confirm_only(self) -> None:
+            self.confirm_only = True
+
+    class OptionsFlowWithReload:
+        automatic_reload = True
+
     config_entries.ConfigEntry = object
     config_entries.ConfigFlow = ConfigFlow
+    config_entries.ConfigFlowResult = dict
     config_entries.OptionsFlow = object
+    config_entries.OptionsFlowWithReload = OptionsFlowWithReload
     sys.modules["homeassistant.config_entries"] = config_entries
     data_entry_flow = types.ModuleType("homeassistant.data_entry_flow")
     data_entry_flow.FlowResult = dict
@@ -508,6 +516,7 @@ def _load_config_flow():
     vol.Required = lambda value, **_kwargs: value
     vol.All = lambda *values: values
     vol.Range = lambda **_kwargs: object()
+    vol.Coerce = lambda value: value
     vol.In = lambda value: value
     sys.modules["voluptuous"] = vol
     background_discovery = types.ModuleType("cozylife_local.background_discovery")
@@ -3304,3 +3313,127 @@ def test_udp_discovery_retries_after_flow_scheduling_raises() -> None:
         service._handle_device(device)
 
     assert create_flow.call_count == 2
+
+
+def test_options_flow_is_entry_scoped_and_preserves_saved_settings() -> None:
+    """The controller and device each offer the applicable options."""
+    config_flow = _load_config_flow()
+
+    def make_flow(data, options):
+        entry = types.SimpleNamespace(data=data, options=options)
+        flow = config_flow.CozyLifeConfigFlow.async_get_options_flow(entry)
+        flow.config_entry = entry
+        flow.async_show_form = lambda **kwargs: kwargs
+        flow.async_create_entry = lambda **kwargs: kwargs
+        flow.add_suggested_values_to_schema = (
+            lambda schema, suggested: (schema, suggested)
+        )
+        assert flow.automatic_reload
+        return flow
+
+    async def exercise() -> None:
+        controller = make_flow(
+            {"entry_type": "discovery_controller"}, {"enable_debug": True}
+        )
+        form = await controller.async_step_init()
+        assert set(form["data_schema"][0]) == {"enable_debug"}
+        assert form["data_schema"][1] == {"enable_debug": True}
+        assert (await controller.async_step_init({"enable_debug": False}))["data"] == {
+            "enable_debug": False,
+        }
+
+        sensor = make_flow(
+            {"pid": "Z4tRml", "dpids": ["8", "4"]}, {"temperature_radius": 1.5},
+        )
+        with patch.object(
+            config_flow, "classify_device",
+            return_value=types.SimpleNamespace(is_environment_sensor=True, is_light=False),
+        ):
+            form = await sensor.async_step_init()
+            assert set(form["data_schema"][0]) == {
+                "filter_outliers", "temperature_radius", "humidity_radius", "enable_debug",
+            }
+            assert form["data_schema"][1]["temperature_radius"] == 1.5
+            result = await sensor.async_step_init({"enable_debug": True})
+            assert result["data"] == {"temperature_radius": 1.5, "enable_debug": True}
+
+    asyncio.run(exercise())
+
+
+def test_color_temperature_options_show_legacy_values_and_validate_range() -> None:
+    """Existing options win and invalid ranges keep the form open."""
+    config_flow = _load_config_flow()
+
+    async def exercise() -> None:
+        entry = types.SimpleNamespace(
+            data={
+                "pid": "rju4K7", "dpids": [3], "min_kelvin": 2000, "max_kelvin": 5500,
+            },
+            options={"min_kelvin": 3000, "enable_debug": True},
+        )
+        flow = config_flow.CozyLifeConfigFlow.async_get_options_flow(entry)
+        flow.config_entry = entry
+        flow.add_suggested_values_to_schema = lambda schema, suggested: (schema, suggested)
+        flow.async_show_form = lambda **kwargs: kwargs
+        flow.async_create_entry = lambda **kwargs: kwargs
+
+        form = await flow.async_step_init()
+        assert form["data_schema"][1] == {
+            "min_kelvin": 3000, "max_kelvin": 5500, "enable_debug": True,
+        }
+        for maximum in (2500, 3000):
+            form = await flow.async_step_init({"max_kelvin": maximum})
+            assert form["errors"] == {"max_kelvin": "invalid_kelvin_range"}
+            assert form["data_schema"][1]["max_kelvin"] == maximum
+        result = await flow.async_step_init({"max_kelvin": 6100})
+        assert result["data"] == {
+            "min_kelvin": 3000, "max_kelvin": 6100, "enable_debug": True,
+        }
+
+        entry.data["dpids"] = ["1", "4"]
+        form = await flow.async_step_init()
+        assert set(form["data_schema"][0]) == {"enable_debug"}
+
+    with patch.object(
+        config_flow, "classify_device",
+        return_value=types.SimpleNamespace(is_environment_sensor=False, is_light=True),
+    ):
+        asyncio.run(exercise())
+
+
+def test_legacy_reload_listener_reacts_only_to_options() -> None:
+    """Older HA can apply options without reloading on address changes."""
+    from unittest.mock import AsyncMock, Mock
+
+    tree = ast.parse((COMPONENT_DIR / "__init__.py").read_text())
+    listener = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_register_legacy_options_listener"
+    )
+    scope = dict(ConfigEntry=object, HomeAssistant=object, config_entries=types.SimpleNamespace())
+    exec(compile(ast.Module(body=[listener], type_ignores=[]), "options-test", "exec"), scope)
+    entry = types.SimpleNamespace(
+        entry_id="entry", options={}, data={"ip_address": "192.0.2.1"},
+        add_update_listener=Mock(return_value=object()), async_on_unload=Mock(),
+    )
+    config_entries = types.SimpleNamespace(async_reload=AsyncMock())
+    hass = types.SimpleNamespace(config_entries=config_entries)
+    scope["_register_legacy_options_listener"](entry)
+    callback = entry.add_update_listener.call_args.args[0]
+    entry.async_on_unload.assert_called_once_with(entry.add_update_listener.return_value)
+
+    async def exercise() -> None:
+        entry.data["ip_address"] = "192.0.2.2"
+        await callback(hass, entry)
+        config_entries.async_reload.assert_not_awaited()
+        entry.options = {"enable_debug": True}
+        await callback(hass, entry)
+        await callback(hass, entry)
+        config_entries.async_reload.assert_awaited_once_with("entry")
+
+    asyncio.run(exercise())
+
+    entry.add_update_listener.reset_mock()
+    scope["config_entries"].OptionsFlowWithReload = object()
+    scope["_register_legacy_options_listener"](entry)
+    entry.add_update_listener.assert_not_called()

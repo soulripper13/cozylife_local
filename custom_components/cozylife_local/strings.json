@@ -11,11 +11,11 @@
       },
       "enable_discovery": {
         "title": "CozyLife Local",
-        "description": "Click Submit once to enable local discovery. Newly announced devices appear through Home Assistant's normal discovered-device card, where you choose whether to add them."
+        "description": "Enable discovery for CozyLife devices on your local network. When a device is found, Home Assistant will offer to add it."
       },
       "manual": {
         "title": "Add CozyLife device by IP",
-        "description": "Use this for devices that UDP discovery cannot see, for example in another subnet or VLAN. Home Assistant must be able to reach the device on TCP port 5555. Give the device a static IP or DHCP reservation, because discovery cannot follow an address change across subnets.",
+        "description": "Add a device using its IPv4 address. This is useful across subnets or VLANs. Home Assistant must be able to reach the device on TCP port 5555. Use a DHCP reservation or static IP if discovery cannot track address changes.",
         "data": {
           "ip_address": "IP address",
           "sensor_pid": "Device type"
@@ -27,7 +27,7 @@
       },
       "confirm_discovery": {
         "title": "CozyLife device found",
-        "description": "A local CozyLife UDP announcement found **{device}** at **{ip_address}**. Confirm to add it. For a supported sleeping sensor, this uses the identity already captured from its announcement."
+        "description": "Add **{device}** at **{ip_address}**?"
       }
     },
     "abort": {
@@ -35,7 +35,8 @@
       "ip_already_configured": "{ip_address} is already used by the CozyLife entry **{title}**. Remove that entry first if a different device now has this address.",
       "invalid_discovery": "The discovered CozyLife announcement did not contain a valid device identity or IPv4 address.",
       "unsupported_announced_model": "The announced device is not an APK-catalogued Wi-Fi product with entities supported by this integration.",
-      "unsupported_device": "This device is not a local Wi-Fi product with entities supported by this integration."
+      "unsupported_device": "This device is not a local Wi-Fi product with entities supported by this integration.",
+      "invalid_import": "Unable to import the CozyLife discovery entry."
     },
     "error": {
       "invalid_ip": "Enter a valid IPv4 address.",
@@ -48,10 +49,9 @@
   "options": {
     "step": {
       "init": {
-        "title": "CozyLife Device Options",
-        "description": "Tune local parameters and logging options for this CozyLife device.",
+        "title": "CozyLife Local options",
         "data": {
-          "enable_debug": "Enable verbose integration debug logs",
+          "enable_debug": "Enable debug logging",
           "filter_outliers": "Filter temperature and humidity outliers",
           "temperature_radius": "Temperature outlier radius (°C)",
           "humidity_radius": "Humidity outlier radius (percentage points)",
@@ -59,12 +59,15 @@
           "min_kelvin": "Minimum Kelvin (Warm White)"
         },
         "data_description": {
-          "enable_debug": "Logs safe protocol summaries and DPID names for diagnosing local transport or entity-mapping problems. It omits local identity and raw state values.",
+          "enable_debug": "Include protocol summaries and data point IDs in the Home Assistant log. Review logs before sharing.",
           "filter_outliers": "Optional four-sample median filter. Rejected samples advance the window so sustained changes are eventually accepted. Duplicate or unidentified reports do not advance it. Disabled passes valid readings, including zero. Enable this option if you experience false-zero readings or other measurement spikes.",
           "min_kelvin": "Adjust the warmest color temperature limit (Kelvin) for this light bulb.",
           "max_kelvin": "Adjust the coolest color temperature limit (Kelvin) for this light bulb."
         }
       }
+    },
+    "error": {
+      "invalid_kelvin_range": "The maximum color temperature must be higher than the minimum."
     }
   }
 }

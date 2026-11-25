@@ -169,13 +169,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # the integration loaded (and therefore its shared discovery listener)
     # across restarts, but owns no device platforms itself.
     if entry.data.get("entry_type") == DISCOVERY_CONTROLLER_ENTRY_TYPE:
+        _register_legacy_options_listener(entry)
         return True
 
     device = None
     try:
         await async_load_model_catalog(hass)
         device = CozyLifeDevice(entry.data["ip_address"])
-        return await _async_setup_device_entry(hass, entry, device, discovery)
+        loaded = await _async_setup_device_entry(hass, entry, device, discovery)
+        if loaded:
+            _register_legacy_options_listener(entry)
+        return loaded
     except BaseException:
         coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
         if discovery is not None and device is not None:
@@ -188,6 +192,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await device.async_close()
         _remove_debug_entry(hass, entry.entry_id)
         raise
+
+
+def _register_legacy_options_listener(entry: ConfigEntry) -> None:
+    """Reload on option edits on Home Assistant versions before native reload."""
+    if hasattr(config_entries, "OptionsFlowWithReload"):
+        return
+
+    previous_options = dict(entry.options)
+
+    async def reload_if_options_changed(hass: HomeAssistant, updated: ConfigEntry) -> None:
+        nonlocal previous_options
+        if updated.options != previous_options:
+            previous_options = dict(updated.options)
+            await hass.config_entries.async_reload(updated.entry_id)
+
+    entry.async_on_unload(entry.add_update_listener(reload_if_options_changed))
 
 
 async def _async_setup_device_entry(hass, entry, device, discovery) -> bool:
@@ -265,15 +285,7 @@ async def _async_setup_device_entry(hass, entry, device, discovery) -> bool:
     # Set up platforms (light, switch, sensor, etc.)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Reload entry when options change
-    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
-
     return True
-
-
-async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload config entry."""
-    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

@@ -1,22 +1,24 @@
+"""Set up and configure CozyLife Local entries."""
+
 import asyncio
-import logging
 import ipaddress
-from typing import Any, Dict, Optional
+import logging
+from typing import Any
 
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
-    DISCOVERY_CONTROLLER_ENTRY_TYPE,
-    DOMAIN,
     DEFAULT_MAX_KELVIN,
     DEFAULT_MIN_KELVIN,
-    LIGHT_KELVIN_RANGES,
+    DISCOVERY_CONTROLLER_ENTRY_TYPE,
+    DOMAIN,
     SENSOR_TYPE_CODE,
     SLEEPING_SENSOR_ID_PREFIX,
+    TEMP,
 )
 from .cozylife_api import CozyLifeDevice
 from .discovery import (
@@ -26,17 +28,17 @@ from .discovery import (
     get_wifi_environment_sensor_models,
     supports_local_entities,
 )
+from .entry_config import (
+    MAX_KELVIN_LIMIT,
+    MIN_KELVIN_LIMIT,
+    default_kelvin_range,
+    entry_kelvin_range,
+    valid_kelvin_range,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 AUTO_DETECT = "auto"
-
-def _kelvin_range_for_pid(pid: str | None) -> tuple[int, int]:
-    """Return the default Kelvin range for a light model."""
-    return LIGHT_KELVIN_RANGES.get(
-        pid or "",
-        (DEFAULT_MIN_KELVIN, DEFAULT_MAX_KELVIN),
-    )
 
 
 class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -44,7 +46,9 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    async def async_step_user(self, user_input: Optional[Dict[str, Any]] = None) -> FlowResult:
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Offer local discovery or adding one device by its IP address."""
         has_controller = any(
             entry.data.get("entry_type") == DISCOVERY_CONTROLLER_ENTRY_TYPE
@@ -58,24 +62,25 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_enable_discovery(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> FlowResult:
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Create the one persistent, no-fields discovery controller entry."""
         if user_input is None:
-            return self.async_show_form(step_id="enable_discovery", data_schema=vol.Schema({}))
+            return self.async_show_form(
+                step_id="enable_discovery", data_schema=vol.Schema({})
+            )
 
-        await self.async_set_unique_id(f"{DOMAIN}_discovery_controller")
-        self._abort_if_unique_id_configured()
-        return self.async_create_entry(
-            title="CozyLife Local",
-            data={"entry_type": DISCOVERY_CONTROLLER_ENTRY_TYPE},
-        )
+        return await self._async_create_discovery_controller()
 
-    async def async_step_import(self, import_data: Dict[str, Any]) -> FlowResult:
+    async def async_step_import(self, import_data: dict[str, Any]) -> ConfigFlowResult:
         """Create the controller automatically when upgrading legacy entries."""
         if import_data.get("entry_type") != DISCOVERY_CONTROLLER_ENTRY_TYPE:
             return self.async_abort(reason="invalid_import")
 
+        return await self._async_create_discovery_controller()
+
+    async def _async_create_discovery_controller(self) -> ConfigFlowResult:
+        """Create the single shared discovery entry."""
         await self.async_set_unique_id(f"{DOMAIN}_discovery_controller")
         self._abort_if_unique_id_configured()
         return self.async_create_entry(
@@ -84,8 +89,8 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def _find_conflicting_entry(
-        self, ip_address: str, device_id: Optional[str] = None
-    ) -> Optional[config_entries.ConfigEntry]:
+        self, ip_address: str, device_id: str | None = None
+    ) -> config_entries.ConfigEntry | None:
         """Return an existing entry that already represents this device.
 
         A sleeping sensor added by hand keeps its placeholder config-entry
@@ -112,8 +117,8 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self,
         entry: config_entries.ConfigEntry,
         ip_address: str,
-        device_id: Optional[str] = None,
-    ) -> FlowResult:
+        device_id: str | None = None,
+    ) -> ConfigFlowResult:
         """Abort, naming the entry when only its address conflicts."""
         if device_id and device_id in (entry.data.get("device_id"), entry.unique_id):
             return self.async_abort(reason="already_configured")
@@ -127,12 +132,16 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_integration_discovery(
         self,
-        discovery_info: Dict[str, Any],
-    ) -> FlowResult:
+        discovery_info: dict[str, Any],
+    ) -> ConfigFlowResult:
         """Present an APK-announced Wi-Fi device for normal HA confirmation."""
         device_id = discovery_info.get("device_id")
         ip_address = discovery_info.get("ip_address")
-        if not isinstance(device_id, str) or not isinstance(ip_address, str):
+        if (
+            not isinstance(device_id, str)
+            or not device_id.strip()
+            or not isinstance(ip_address, str)
+        ):
             return self.async_abort(reason="invalid_discovery")
 
         try:
@@ -150,8 +159,8 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _async_create_discovered_entry(
         self,
-        discovery_info: Dict[str, Any],
-    ) -> FlowResult:
+        discovery_info: dict[str, Any],
+    ) -> ConfigFlowResult:
         """Create a confirmed entry from its saved UDP announcement."""
         ip_address = discovery_info["ip_address"]
         device_id = discovery_info["device_id"]
@@ -184,7 +193,7 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     pid, classification
                 ):
                     min_kelvin, max_kelvin = (
-                        _kelvin_range_for_pid(pid)
+                        default_kelvin_range(pid)
                         if classification.is_light
                         else (DEFAULT_MIN_KELVIN, DEFAULT_MAX_KELVIN)
                     )
@@ -208,8 +217,8 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_confirm_discovery(
         self,
-        user_input: Optional[Dict[str, Any]] = None,
-    ) -> FlowResult:
+        user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
         """Let Home Assistant's standard discovery card confirm a device."""
         discovery_info = getattr(self, "_udp_discovery_info", None)
         if not isinstance(discovery_info, dict):
@@ -225,6 +234,7 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if model is not None and model.model_name
             else "CozyLife device"
         )
+        self._set_confirm_only()
         return self.async_show_form(
             step_id="confirm_discovery",
             description_placeholders={
@@ -233,7 +243,7 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
-    def _manual_schema(self, user_input: Optional[Dict[str, Any]] = None) -> vol.Schema:
+    def _manual_schema(self, user_input: dict[str, Any] | None = None) -> vol.Schema:
         """Return the add-by-IP form schema."""
         user_input = user_input or {}
         sensor_options = {AUTO_DETECT: "Auto-detect (device must be online)"}
@@ -259,15 +269,15 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_manual(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> FlowResult:
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Add a device by IP address, e.g. one in another subnet or VLAN.
 
         UDP discovery relies on broadcasts that do not cross subnets, but the
         device's local TCP control port (5555) may still be routable.
         """
         await async_load_model_catalog(self.hass)
-        errors: Dict[str, str] = {}
+        errors: dict[str, str] = {}
         if user_input is not None:
             ip_address = str(user_input.get("ip_address", "")).strip()
             try:
@@ -293,7 +303,7 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _async_create_entry_from_ip(
         self, ip_address: str
-    ) -> tuple[Optional[FlowResult], str]:
+    ) -> tuple[ConfigFlowResult | None, str]:
         """Read a device's identity over local TCP and create its entry."""
         device = CozyLifeDevice(ip_address)
         try:
@@ -327,7 +337,7 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return None, "unsupported_device"
 
         min_kelvin, max_kelvin = (
-            _kelvin_range_for_pid(device.pid)
+            default_kelvin_range(device.pid)
             if classification.is_light
             else (DEFAULT_MIN_KELVIN, DEFAULT_MAX_KELVIN)
         )
@@ -350,7 +360,7 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _async_create_sleeping_sensor_entry(
         self, ip_address: str, pid: str
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Create a sleeping sensor entry without waking the device.
 
         The entry starts with a placeholder device ID; the coordinator
@@ -367,6 +377,9 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self._abort_for_conflict(conflict, ip_address)
         device_id = f"{SLEEPING_SENSOR_ID_PREFIX}{pid}_{ip_address}"
         await self.async_set_unique_id(device_id)
+        conflict = self._find_conflicting_entry(ip_address)
+        if conflict is not None:
+            return self._abort_for_conflict(conflict, ip_address)
         self._abort_if_unique_id_configured()
         return self.async_create_entry(
             title=f"{model.model_name or 'CozyLife sensor'} @ {ip_address}",
@@ -382,68 +395,74 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry):
-        """Get the options flow for this handler."""
-        return CozyLifeOptionsFlow(config_entry)
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> "CozyLifeOptionsFlow":
+        """Create the options flow for this entry."""
+        return CozyLifeOptionsFlow()
 
-class CozyLifeOptionsFlow(config_entries.OptionsFlow):
-    """Handle CozyLife options."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry):
-        """Initialize CozyLife options flow."""
-        self._config_entry = config_entry
+# Older Home Assistant versions use the entry listener registered at setup.
+_OptionsFlowBase = getattr(
+    config_entries, "OptionsFlowWithReload", config_entries.OptionsFlow
+)
 
-    async def async_step_init(self, user_input: Optional[Dict[str, Any]] = None) -> FlowResult:
-        """Manage the options."""
+
+class CozyLifeOptionsFlow(_OptionsFlowBase):
+    """Apply changes through Home Assistant's options reload lifecycle."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Edit the options available for this entry."""
+        entry = self.config_entry
+        schema_fields: dict[Any, Any] = {}
+        current = dict(entry.options)
+        has_kelvin_options = False
+        if entry.data.get("entry_type") != DISCOVERY_CONTROLLER_ENTRY_TYPE:
+            pid = entry.data.get("pid")
+            dpids = entry.data.get("dpids") or []
+            classification = classify_device(
+                pid, entry.data.get("device_type_code"), dpids
+            )
+            if classification.is_environment_sensor:
+                schema_fields.update(
+                    {
+                        vol.Optional("filter_outliers", default=False): bool,
+                        vol.Optional("temperature_radius", default=2.0): vol.All(
+                            vol.Coerce(float), vol.Range(min=0.1, max=120)
+                        ),
+                        vol.Optional("humidity_radius", default=10.0): vol.All(
+                            vol.Coerce(float), vol.Range(min=0.1, max=100)
+                        ),
+                    }
+                )
+            has_kelvin_options = classification.is_light and TEMP in {
+                str(dpid) for dpid in dpids
+            }
+            if has_kelvin_options:
+                minimum, maximum = entry_kelvin_range(pid, entry.data, entry.options)
+                for key, default in (("min_kelvin", minimum), ("max_kelvin", maximum)):
+                    schema_fields[vol.Optional(key, default=default)] = vol.All(
+                        int, vol.Range(min=MIN_KELVIN_LIMIT, max=MAX_KELVIN_LIMIT)
+                    )
+                current.update(min_kelvin=minimum, max_kelvin=maximum)
+
+        schema_fields[vol.Optional("enable_debug", default=False)] = bool
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            options = {**current, **user_input}
+            if has_kelvin_options and not valid_kelvin_range(
+                options["min_kelvin"], options["max_kelvin"]
+            ):
+                errors["max_kelvin"] = "invalid_kelvin_range"
+            else:
+                return self.async_create_entry(title="", data=options)
 
         return self.async_show_form(
             step_id="init",
-            data_schema=self._options_schema(),
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(schema_fields), {**current, **(user_input or {})}
+            ),
+            errors=errors,
         )
-
-    def _options_schema(self) -> vol.Schema:
-        """Return the options schema for this config entry."""
-        dpids = self._config_entry.data.get("dpids") or []
-        pid = self._config_entry.data.get("pid", "")
-        classification = classify_device(
-            pid,
-            self._config_entry.data.get("device_type_code"),
-            dpids,
-        )
-        is_light = classification.is_light
-
-        schema_fields: Dict[Any, Any] = {}
-        if classification.is_environment_sensor:
-            options = self._config_entry.options
-            schema_fields[vol.Optional("filter_outliers", default=options.get("filter_outliers", False))] = bool
-            schema_fields[vol.Optional("temperature_radius", default=options.get("temperature_radius", 2.0))] = vol.All(vol.Coerce(float), vol.Range(min=0.1, max=120))
-            schema_fields[vol.Optional("humidity_radius", default=options.get("humidity_radius", 10.0))] = vol.All(vol.Coerce(float), vol.Range(min=0.1, max=100))
-        if is_light:
-            model_min_kelvin, model_max_kelvin = _kelvin_range_for_pid(pid)
-            stored_min_kelvin = self._config_entry.data.get("min_kelvin", DEFAULT_MIN_KELVIN)
-            stored_max_kelvin = self._config_entry.data.get("max_kelvin", DEFAULT_MAX_KELVIN)
-            schema_fields[
-                vol.Optional(
-                    "min_kelvin",
-                    default=(
-                        model_min_kelvin
-                        if stored_min_kelvin == DEFAULT_MIN_KELVIN
-                        else stored_min_kelvin
-                    ),
-                )
-            ] = vol.All(int, vol.Range(min=1000, max=10000))
-            schema_fields[
-                vol.Optional(
-                    "max_kelvin",
-                    default=(
-                        model_max_kelvin
-                        if stored_max_kelvin == DEFAULT_MAX_KELVIN
-                        else stored_max_kelvin
-                    ),
-                )
-            ] = vol.All(int, vol.Range(min=1000, max=10000))
-        schema_fields[vol.Optional("enable_debug", default=self._config_entry.options.get("enable_debug", False))] = bool
-
-        return vol.Schema(schema_fields)

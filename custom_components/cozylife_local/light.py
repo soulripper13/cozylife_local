@@ -27,11 +27,9 @@ from .const import (
     SAT,
     SWITCH,
     WORK_MODE,
-    DEFAULT_MIN_KELVIN,
-    DEFAULT_MAX_KELVIN,
-    LIGHT_KELVIN_RANGES,
 )
 from .coordinator import CozyLifeCoordinator
+from .entry_config import entry_kelvin_range
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,14 +51,6 @@ def _parse_color_hex(value: Any) -> Optional[tuple[int, int]]:
     if hue > 360 or sat > 1000:
         return None
     return hue, sat
-
-
-def _kelvin_range_for_pid(pid: str | None) -> tuple[int, int]:
-    """Return the default Kelvin range for a light model."""
-    return LIGHT_KELVIN_RANGES.get(
-        pid or "",
-        (DEFAULT_MIN_KELVIN, DEFAULT_MAX_KELVIN),
-    )
 
 
 def _valid_color_component(value: Any, maximum: int) -> bool:
@@ -105,28 +95,10 @@ class CozyLifeLight(CoordinatorEntity[CozyLifeCoordinator], LightEntity):
         super().__init__(coordinator)
         self._attr_name = None
         self._attr_unique_id = f"{coordinator.device.device_id}_light"
-        model_min_kelvin, model_max_kelvin = _kelvin_range_for_pid(
-            coordinator.device.pid
+        self._min_kelvin, self._max_kelvin = entry_kelvin_range(
+            coordinator.device.pid, entry.data, entry.options
         )
-        stored_min_kelvin = entry.data.get("min_kelvin", DEFAULT_MIN_KELVIN)
-        stored_max_kelvin = entry.data.get("max_kelvin", DEFAULT_MAX_KELVIN)
-        self._min_kelvin = entry.options.get(
-            "min_kelvin",
-            (
-                model_min_kelvin
-                if stored_min_kelvin == DEFAULT_MIN_KELVIN
-                else stored_min_kelvin
-            ),
-        )
-        self._max_kelvin = entry.options.get(
-            "max_kelvin",
-            (
-                model_max_kelvin
-                if stored_max_kelvin == DEFAULT_MAX_KELVIN
-                else stored_max_kelvin
-            ),
-        )
-        
+
         self._supported_color_modes: set[ColorMode] = set()
         if not coordinator.device.dpid:
             self._supported_color_modes.add(ColorMode.ONOFF)

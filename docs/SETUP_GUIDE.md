@@ -159,7 +159,7 @@ If a compatible plug reports both DPID 26 (**Energy**) and DPID 42 (**Total ener
 
 CozyLife smart lights can range from basic dimmable warm white to fully addressable RGB strip lights.
 
-*   **Color Temp Settings**: During setup or via **Options**, you can configure the specific Kelvin range (default: `2000K` to `6500K`) to match your bulb's hardware capabilities.
+*   **Color Temp Settings**: For lights with color-temperature control, open the device entry's **Configure** dialog to adjust its Kelvin range. Model-specific defaults apply where available.
 *   **Work Mode Management**: 
     *   Some lights require toggling the work mode (DPID 2) when moving between white light and RGB color.
     *   The integration features automatic state corrections. When you set an RGB color, it correctly preserves work mode states to prevent standard bulb firmware from glitching or flashing dark blue.
