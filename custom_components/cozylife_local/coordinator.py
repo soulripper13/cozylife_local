@@ -112,7 +112,7 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         super().__init__(
             hass,
             _UPDATE_LOGGER,
-            name=f"CozyLife device {device.ip_address}",
+            name="CozyLife device",
             update_interval=interval,
             config_entry=entry,
         )

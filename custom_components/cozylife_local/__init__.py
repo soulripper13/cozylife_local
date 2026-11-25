@@ -155,7 +155,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         debug_entry_ids.discard(entry.entry_id)
     _refresh_debug_logging(hass)
     if entry.options.get("enable_debug", False):
-        _LOGGER.debug("Debug logging enabled via options for %s", entry.title)
+        _LOGGER.debug("Debug logging enabled via entry options")
 
     discovery = hass.data[DOMAIN].get(DATA_DISCOVERY_SERVICE)
     if discovery is None or not discovery.is_running:
@@ -229,6 +229,11 @@ async def _async_setup_device_entry(hass, entry, device, discovery) -> bool:
     # Create a coordinator for this device
     coordinator = CozyLifeCoordinator(hass, device, entry)
     hass.data[DOMAIN][entry.entry_id] = coordinator
+    if discovery is not None:
+        # Initialize before registration can route a cached announcement.
+        # Publishing an empty update would mark the device healthy.
+        coordinator.data = {}
+        coordinator.last_update_success = False
     if discovery is not None and device.device_id:
         discovery.register_device(
             device.device_id,
@@ -246,21 +251,13 @@ async def _async_setup_device_entry(hass, entry, device, discovery) -> bool:
             )
     hass.async_create_task(coordinator.async_start_discovery())
 
-    if discovery is not None:
-        # The APK sends local Wi-Fi TCP only for an address present in its UDP
-        # cache. Configured entries therefore begin unavailable and refresh
-        # when their matching announcement is routed, including a cached
-        # announcement already received during setup.
-        coordinator.async_set_updated_data({})
-        if entry.data.get("manual") and not coordinator.is_sensor:
-            # Manually added devices may live in another subnet where UDP
-            # announcements never arrive. Poll over TCP right away instead of
-            # waiting for the first periodic availability refresh.
-            hass.async_create_task(coordinator.async_request_refresh())
-    else:
+    if discovery is None:
         # Preserve a usable manual path if Home Assistant could not create the
         # UDP listener at all.
         await coordinator.async_config_entry_first_refresh()
+    elif entry.data.get("manual") and not coordinator.is_sensor:
+        # Manually added devices may live outside the UDP broadcast subnet.
+        hass.async_create_task(coordinator.async_request_refresh())
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
     _async_remove_obsolete_schedule_entities(hass, entry)

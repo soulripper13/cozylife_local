@@ -156,12 +156,6 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         ip_address = discovery_info["ip_address"]
         device_id = discovery_info["device_id"]
 
-        # The card may have been open while the same device was added by IP;
-        # the unique-ID check made when the card appeared cannot see that.
-        conflict = self._find_conflicting_entry(ip_address, device_id)
-        if conflict is not None:
-            return self._abort_for_conflict(conflict, ip_address, device_id)
-
         # The APK treats an announced DID/IP pair as the local identity. It
         # associates that identity with its catalogue profile, then refreshes
         # it asynchronously with cmd 2 / attr:[1]; it does not make a cmd 0
@@ -170,6 +164,14 @@ class CozyLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         pid = discovery_info.get("pid")
         if isinstance(pid, str) and pid:
             await async_load_model_catalog(self.hass)
+
+        # A manual flow may claim this device or its address while the card
+        # is open or while the catalog loads. Check after the final await.
+        conflict = self._find_conflicting_entry(ip_address, device_id)
+        if conflict is not None:
+            return self._abort_for_conflict(conflict, ip_address, device_id)
+
+        if isinstance(pid, str) and pid:
             model = get_model_info(pid)
             device_type_code = discovery_info.get("device_type_code")
             if model is not None and model.network_type == "02":

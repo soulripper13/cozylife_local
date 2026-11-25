@@ -432,8 +432,15 @@ def _load_coordinator():
     update_coordinator = types.ModuleType("homeassistant.helpers.update_coordinator")
 
     class DataUpdateCoordinator:
-        def __init__(self, *_args, update_interval=None, **_kwargs) -> None:
+        def __init__(self, *_args, name=None, update_interval=None, **_kwargs) -> None:
+            self.name = name
             self.update_interval = update_interval
+            self.last_update_success = True
+            self.data = None
+
+        def async_set_updated_data(self, data) -> None:
+            self.data = data
+            self.last_update_success = True
 
         @classmethod
         def __class_getitem__(cls, _item):
@@ -452,6 +459,8 @@ def _load_coordinator():
     sys.modules["homeassistant.helpers"] = helpers
     sys.modules["homeassistant.helpers.entity_registry"] = entity_registry
     sys.modules["homeassistant.helpers.update_coordinator"] = update_coordinator
+    sys.modules.pop("cozylife_local.coordinator", None)
+    sys.modules.pop("cozylife_local.discovery", None)
     from cozylife_local.coordinator import CozyLifeCoordinator
 
     return CozyLifeCoordinator
@@ -1449,6 +1458,8 @@ def test_sensor_status_write_keeps_the_reader_for_an_async_report() -> None:
 def test_sensor_transport_keeps_discovery_and_status_requests_separate() -> None:
     """The sensor retry path is separate from the UDP discovery service."""
     _load_coordinator()
+    sys.modules.pop("cozylife_local.coordinator", None)
+    sys.modules.pop("cozylife_local.discovery", None)
     from cozylife_local.coordinator import CozyLifeCoordinator
 
     assert hasattr(CozyLifeCoordinator, "_async_request_sensor_status")
@@ -3122,3 +3133,174 @@ def test_schedule_entity_migration_removes_only_retired_entities() -> None:
         "switch.plug_schedule_enabled",
         "select.plug_schedule_action",
     ]
+
+
+def test_powered_setup_waits_for_state_and_retries_on_cached_announcement() -> None:
+    """An empty cache and a successful write cannot make a new device healthy."""
+    from unittest.mock import AsyncMock, Mock
+
+    Coordinator = _load_coordinator()
+    tree = ast.parse((COMPONENT_DIR / "__init__.py").read_text())
+    setup = next(
+        node for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_async_setup_device_entry"
+    )
+    scope = {
+        "DOMAIN": "cozylife_local",
+        "CozyLifeCoordinator": Coordinator,
+        "PLATFORMS": [],
+        "_LOGGER": Mock(),
+        "_async_remove_obsolete_schedule_entities": Mock(),
+        "async_reload_entry": Mock(),
+    }
+    exec(compile(ast.Module(body=[setup], type_ignores=[]), "setup-test", "exec"), scope)
+
+    async def exercise() -> None:
+        ip_address = "192.0.2.50"
+        entry = types.SimpleNamespace(
+            data={"ip_address": ip_address, "device_id": "plug", "pid": "h38t1p",
+                  "device_type_code": "00", "dpids": ["1"]},
+            entry_id="entry",
+            async_on_unload=Mock(),
+            add_update_listener=Mock(),
+        )
+        device = types.SimpleNamespace(
+            ip_address=ip_address,
+            device_id="plug",
+            pid="h38t1p",
+            device_type_code="00",
+            dpid=["1"],
+            restore_from_cache=Mock(),
+            set_message_listener=Mock(),
+            async_update_ip_address=AsyncMock(return_value=False),
+            async_request_properties=AsyncMock(return_value=True),
+        )
+        tasks = []
+
+        def create_task(coro):
+            task = asyncio.create_task(coro)
+            tasks.append(task)
+            return task
+
+        hass = types.SimpleNamespace(
+            data={"cozylife_local": {}},
+            config_entries=types.SimpleNamespace(async_forward_entry_setups=AsyncMock()),
+            async_create_task=create_task,
+        )
+
+        def register_device(_did, _entry_id, callback):
+            coordinator = hass.data["cozylife_local"]["entry"]
+            assert coordinator.data == {}
+            assert not coordinator.last_update_success
+            create_task(callback(ip_address))
+
+        async def refresh(coordinator) -> None:
+            try:
+                await coordinator._async_get_local_state()
+            except RuntimeError as error:
+                assert str(error) == "No recent CozyLife device state"
+            else:
+                raise AssertionError("A completed write is insufficient at startup")
+
+        discovery = types.SimpleNamespace(register_device=register_device)
+        with (
+            patch.object(Coordinator, "async_request_refresh", refresh, create=True),
+            patch.object(Coordinator, "_async_request_missing_powered_state"),
+        ):
+            assert await scope["_async_setup_device_entry"](hass, entry, device, discovery)
+            await asyncio.gather(*tasks)
+            coordinator = hass.data["cozylife_local"]["entry"]
+            device.async_request_properties.assert_awaited_once()
+            assert not coordinator.last_update_success
+            await coordinator._async_handle_device_message({"msg": {"data": {"1": 1}}})
+            assert coordinator.last_update_success
+            assert coordinator.data == {"1": 1}
+
+    asyncio.run(exercise())
+
+
+def test_coordinator_log_label_omits_local_identity() -> None:
+    """HA includes the coordinator name in its own refresh failures."""
+    Coordinator = _load_coordinator()
+    device = types.SimpleNamespace(
+        ip_address="192.0.2.50", device_id="private-device-id",
+        pid="h38t1p", device_type_code="00", dpid=["1"],
+        set_message_listener=lambda _listener: None,
+    )
+    coordinator = Coordinator(object(), device, object())
+
+    assert coordinator.name == "CozyLife device"
+
+
+def test_discovery_rechecks_conflicts_after_catalog_load() -> None:
+    """A manual entry created during catalog loading takes precedence."""
+    config_flow = _load_config_flow()
+
+    async def exercise() -> None:
+        flow = _manual_flow(config_flow)
+        entries = []
+        flow._async_current_entries = lambda include_ignore=None: entries
+        catalog_loading = asyncio.Event()
+        resume_catalog = asyncio.Event()
+
+        async def load_catalog(_hass) -> None:
+            catalog_loading.set()
+            await resume_catalog.wait()
+
+        model = types.SimpleNamespace(
+            network_type="02", model_name="Plug", type_code="00", dpids={"1"},
+        )
+        for did, reason in (
+            ("plug", "already_configured"),
+            ("sleeping_sensor_Z4tRml_192.0.2.50", "ip_already_configured"),
+        ):
+            entries.clear()
+            catalog_loading.clear()
+            resume_catalog.clear()
+            with (
+                patch.object(config_flow, "async_load_model_catalog", load_catalog),
+                patch.object(config_flow, "get_model_info", return_value=model),
+                patch.object(
+                    config_flow, "classify_device",
+                    return_value=types.SimpleNamespace(
+                        is_local_transport=True, is_light=False
+                    ),
+                ),
+                patch.object(config_flow, "supports_local_entities", return_value=True),
+            ):
+                pending = asyncio.create_task(flow._async_create_discovered_entry({
+                    "ip_address": "192.0.2.50", "device_id": "plug", "pid": "h38t1p",
+                }))
+                await catalog_loading.wait()
+                entries.append(_config_entry(
+                    "Manual entry", {"ip_address": "192.0.2.50", "device_id": did}, did
+                ))
+                resume_catalog.set()
+                result = await pending
+            assert result["type"] == "abort"
+            assert result["reason"] == reason
+
+        assert flow.entries == []
+
+    asyncio.run(exercise())
+
+
+def test_udp_discovery_retries_after_flow_scheduling_raises() -> None:
+    """A failed schedule permits one retry and still deduplicates later offers."""
+    from unittest.mock import Mock
+
+    discovery = _load_background_discovery()
+    hass = types.SimpleNamespace(
+        config_entries=types.SimpleNamespace(async_entries=lambda _domain: []),
+    )
+    service = discovery.CozyLifeBackgroundDiscovery(hass)
+    device = discovery.UdpDiscoveredDevice("plug", "192.0.2.50", "h38t1p", "00")
+    create_flow = Mock(side_effect=(RuntimeError("temporary failure"), None))
+
+    with patch.object(discovery.discovery_flow, "async_create_flow", create_flow):
+        service._handle_device(device)
+        assert device.device_id not in service._pending_discovery_ids
+        service._handle_device(device)
+        service._handle_device(device)
+
+    assert create_flow.call_count == 2
