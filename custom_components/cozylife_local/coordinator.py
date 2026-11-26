@@ -564,7 +564,12 @@ class CozyLifeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not await self.device.async_request_properties(
             timeout=POWERED_DEVICE_AVAILABILITY_TIMEOUT_SECONDS
         ):
-            raise UpdateFailed("Failed to request state from CozyLife device")
+            detail = getattr(self.device, "last_properties_request_failure", None)
+            raise UpdateFailed(
+                f"Failed to request state from CozyLife device ({detail})"
+                if detail
+                else "Failed to request state from CozyLife device"
+            )
         # A write alone cannot recover an unavailable device. The reader
         # can restore availability as soon as it receives actual state.
         if not getattr(self, "last_update_success", True) or (

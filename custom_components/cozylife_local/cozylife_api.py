@@ -50,6 +50,7 @@ class CozyLifeDevice:
         self._connection_lock: Optional[asyncio.Lock] = None
         self._status_lock: Optional[asyncio.Lock] = None
         self._last_transport_error: Optional[str] = None
+        self.last_properties_request_failure: str | None = None
         self._tcp_user_timeout_ms: int | None = None
         self.last_frame_received_at: float | None = None
         self._properties_requested_at: float | None = None
@@ -525,11 +526,15 @@ class CozyLifeDevice:
         """Use the APK write-and-listen state path over one durable socket."""
         state_waiter = None
         writer = None
+        if track_properties_response:
+            self.last_properties_request_failure = None
         try:
             await self._connect()
             drain_timeout = self._timeout if write_timeout is None else write_timeout
             writer = self._writer
             if writer is None:
+                if track_properties_response:
+                    self.last_properties_request_failure = "TCP session changed during connection"
                 return None
 
             state_waiter: asyncio.Future[Dict[str, Any]] | None = None
@@ -566,7 +571,10 @@ class CozyLifeDevice:
             finally:
                 if state_waiter in self._state_waiters:
                     self._state_waiters.remove(state_waiter)
-        except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
+        except (asyncio.TimeoutError, OSError) as err:
+            if track_properties_response:
+                stage = "TCP connect" if writer is None else "TCP write"
+                self.last_properties_request_failure = f"{stage}: {type(err).__name__}"
             self._disconnect_if_current(writer)
             return None
         finally:

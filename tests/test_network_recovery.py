@@ -483,7 +483,7 @@ def test_powered_refresh_connect_budget(delay, should_connect):
                     assert report["msg"]["data"] == {"1": 1}
                     await asyncio.wait_for(peer_done.wait(), 1)
                 else:
-                    with pytest.raises(RuntimeError, match="^Failed to request state from CozyLife device$"):
+                    with pytest.raises(RuntimeError, match=r"TCP connect: TimeoutError"):
                         await coordinator._async_get_local_state()
                     assert commands.empty()
         finally:
@@ -574,5 +574,56 @@ def test_close_does_not_allow_an_inflight_dial_to_restore_the_socket():
             assert writer.closed
             assert device._writer is None
             assert device._reader_task is None
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    ("stage", "error", "detail"),
+    [
+        ("connect", ConnectionRefusedError, "TCP connect: ConnectionRefusedError"),
+        ("write", BrokenPipeError, "TCP write: BrokenPipeError"),
+        ("write", TimeoutError, "TCP write: TimeoutError"),
+    ],
+)
+def test_powered_request_logs_safe_failure_stage(stage, error, detail):
+    """Surface the reason through HA's coordinator without logging exception text."""
+    Device = _load_api()
+    Coordinator = _load_coordinator()
+
+    async def exercise():
+        address = "192.0.2.42"
+        device = Device(address)
+        coordinator = object.__new__(Coordinator)
+        coordinator.device = device
+        coordinator._uses_sensor_polling = False
+        coordinator.data = {"1": 1}
+        fail = True
+
+        class Writer:
+            def write(self, _data):
+                pass
+
+            async def drain(self):
+                if stage == "write" and fail:
+                    raise error(f"private endpoint {address}")
+
+            def close(self):
+                pass
+
+        async def connect():
+            if stage == "connect" and fail:
+                raise error(f"private endpoint {address}")
+            device._writer = Writer()
+
+        with patch.object(device, "_connect", connect):
+            with pytest.raises(RuntimeError) as caught:
+                await coordinator._async_get_local_state()
+            assert str(caught.value) == (
+                f"Failed to request state from CozyLife device ({detail})"
+            )
+            fail = False
+            assert await coordinator._async_get_local_state() == {"1": 1}
+            assert device.last_properties_request_failure is None
 
     asyncio.run(exercise())
