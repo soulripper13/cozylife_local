@@ -484,7 +484,7 @@ class CozyLifeDevice:
             return (
                 await self._async_request_state(
                     [0], wait_for_state=False, write_timeout=timeout,
-                    track_properties_response=True,
+                    track_properties_response=True, retry_dropped_socket=True,
                 )
                 is not None
             )
@@ -522,10 +522,13 @@ class CozyLifeDevice:
         wait_for_state: bool,
         write_timeout: float | None = None,
         track_properties_response: bool = False,
+        retry_dropped_socket: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Use the APK write-and-listen state path over one durable socket."""
         state_waiter = None
         writer = None
+        previous_writer = self._writer
+        generation = self._connection_generation
         if track_properties_response:
             self.last_properties_request_failure = None
         try:
@@ -576,6 +579,25 @@ class CozyLifeDevice:
                 stage = "TCP connect" if writer is None else "TCP write"
                 self.last_properties_request_failure = f"{stage}: {type(err).__name__}"
             self._disconnect_if_current(writer)
+            if (
+                retry_dropped_socket
+                and isinstance(
+                    err, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
+                )
+                and writer is not None
+                and writer is previous_writer
+                and self._writer is None
+                and generation == self._connection_generation
+            ):
+                # Replay only the read-only powered poll, once. Interactive
+                # commands may already have taken effect before a write fails.
+                _RAW_LOGGER.debug("Retrying powered properties after the existing socket dropped")
+                return await self._async_request_state(
+                    attributes,
+                    wait_for_state=False,
+                    write_timeout=write_timeout,
+                    track_properties_response=True,
+                )
             return None
         finally:
             if state_waiter is not None:
