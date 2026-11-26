@@ -283,10 +283,9 @@ class CozyLifeBackgroundDiscovery:
                     "device_type_code": device.device_type_code,
                 },
             )
-        except Exception:  # pragma: no cover - Home Assistant owns flow errors.
-            _LOGGER.exception(
-                "Unable to start a CozyLife discovery flow",
-            )
+        except Exception:
+            self._pending_discovery_ids.discard(device.device_id)
+            _LOGGER.exception("Unable to schedule a CozyLife discovery flow")
 
 
 async def async_get_background_discovery(

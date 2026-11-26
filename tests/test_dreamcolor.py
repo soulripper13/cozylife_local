@@ -47,9 +47,19 @@ def _light_module():
         ATTR_HS_COLOR="hs_color", ATTR_BRIGHTNESS="brightness",
         ATTR_COLOR_TEMP_KELVIN="color_temp_kelvin")
     exec((root / "const.py").read_text(), namespace)
-    tree = ast.parse((root / "light.py").read_text())
-    nodes = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Assign))]
-    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(root / "light.py"), "exec"), namespace)
+    from collections.abc import Mapping
+
+    namespace["Mapping"] = Mapping
+    for filename in ("entry_config.py", "light.py"):
+        tree = ast.parse((root / filename).read_text())
+        nodes = [
+            node for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.Assign))
+        ]
+        exec(
+            compile(ast.Module(body=nodes, type_ignores=[]), str(root / filename), "exec"),
+            namespace,
+        )
     return types.SimpleNamespace(**namespace)
 
 
@@ -214,3 +224,13 @@ def test_successful_white_write_supersedes_cached_packed_white():
     )
     assert light.color_mode == module.ColorMode.COLOR_TEMP
     assert light.color_temp_kelvin == light.max_color_temp_kelvin
+
+
+def test_saved_invalid_kelvin_options_fall_back_to_safe_endpoints():
+    module = _light_module()
+    assert module.entry_kelvin_range(
+        "rju4K7", {"min_kelvin": 2000, "max_kelvin": 5500}, {"min_kelvin": 5500}
+    ) == (2700, 5500)
+    assert module.entry_kelvin_range(
+        "rju4K7", {"min_kelvin": 5000, "max_kelvin": 3000}, {"max_kelvin": 5000}
+    ) == (2700, 6500)

@@ -483,7 +483,7 @@ def test_powered_refresh_connect_budget(delay, should_connect):
                     assert report["msg"]["data"] == {"1": 1}
                     await asyncio.wait_for(peer_done.wait(), 1)
                 else:
-                    with pytest.raises(RuntimeError, match="^Failed to request state from CozyLife device$"):
+                    with pytest.raises(RuntimeError, match=r"TCP connect: TimeoutError"):
                         await coordinator._async_get_local_state()
                     assert commands.empty()
         finally:
@@ -574,5 +574,106 @@ def test_close_does_not_allow_an_inflight_dial_to_restore_the_socket():
             assert writer.closed
             assert device._writer is None
             assert device._reader_task is None
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    ("stage", "error", "detail"),
+    [
+        ("connect", ConnectionRefusedError, "TCP connect: ConnectionRefusedError"),
+        ("write", BrokenPipeError, "TCP write: BrokenPipeError"),
+        ("write", TimeoutError, "TCP write: TimeoutError"),
+    ],
+)
+def test_powered_request_logs_safe_failure_stage(stage, error, detail):
+    """Surface the reason through HA's coordinator without logging exception text."""
+    Device = _load_api()
+    Coordinator = _load_coordinator()
+
+    async def exercise():
+        address = "192.0.2.42"
+        device = Device(address)
+        coordinator = object.__new__(Coordinator)
+        coordinator.device = device
+        coordinator._uses_sensor_polling = False
+        coordinator.data = {"1": 1}
+        fail = True
+
+        class Writer:
+            def write(self, _data):
+                pass
+
+            async def drain(self):
+                if stage == "write" and fail:
+                    raise error(f"private endpoint {address}")
+
+            def close(self):
+                pass
+
+        async def connect():
+            if stage == "connect" and fail:
+                raise error(f"private endpoint {address}")
+            device._writer = Writer()
+
+        with patch.object(device, "_connect", connect):
+            with pytest.raises(RuntimeError) as caught:
+                await coordinator._async_get_local_state()
+            assert str(caught.value) == (
+                f"Failed to request state from CozyLife device ({detail})"
+            )
+            fail = False
+            assert await coordinator._async_get_local_state() == {"1": 1}
+            assert device.last_properties_request_failure is None
+
+    asyncio.run(exercise())
+
+
+def test_powered_poll_reconnects_when_existing_socket_drops_during_write():
+    """A peer closing during a poll must not force a false availability failure."""
+    Device = _load_api()
+
+    async def exercise():
+        connections = asyncio.Queue()
+        reports = asyncio.Queue()
+
+        async def peer(reader, writer):
+            try:
+                await connections.put(writer)
+                while line := await reader.readline():
+                    assert json.loads(line)["msg"] == {"attr": [0]}
+                    writer.write(b'{"cmd":2,"msg":{"data":{"1":1}}}\r\n')
+                    await writer.drain()
+            finally:
+                writer.close()
+                await writer.wait_closed()
+
+        server = await asyncio.start_server(peer, "127.0.0.1", 0)
+        device = Device("127.0.0.1")
+        device.set_message_listener(reports.put_nowait)
+        try:
+            with patch("cozylife_local.cozylife_api.COZYLIFE_PORT",
+                       server.sockets[0].getsockname()[1]):
+                assert await device.async_request_properties()
+                first_peer = await asyncio.wait_for(connections.get(), 1)
+                await asyncio.wait_for(reports.get(), 1)
+                first_writer = device._writer
+                first_reader_task = device._reader_task
+
+                async def drop_during_write():
+                    first_peer.close()
+                    await first_peer.wait_closed()
+                    await asyncio.wait_for(first_reader_task, 1)
+                    raise ConnectionResetError("peer dropped during write")
+
+                with patch.object(first_writer, "drain", drop_during_write):
+                    assert await device.async_request_properties()
+                assert await asyncio.wait_for(connections.get(), 1) is not first_peer
+                assert (await asyncio.wait_for(reports.get(), 1))["msg"]["data"] == {"1": 1}
+                assert device.last_properties_request_failure is None
+        finally:
+            await device.async_close()
+            server.close()
+            await server.wait_closed()
 
     asyncio.run(exercise())

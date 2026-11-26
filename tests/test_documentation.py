@@ -64,7 +64,8 @@ def test_debug_documentation_matches_safe_logging_contract() -> None:
 
     assert "raw device handshakes" not in setup
     assert "complete local packet handshakes" not in description
-    assert "omits local identity and raw state values" in description
+    assert "protocol summaries and data point IDs" in description
+    assert "Review logs before sharing" in description
     assert description == translated_description
 
 
